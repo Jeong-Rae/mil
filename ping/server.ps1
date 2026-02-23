@@ -1,12 +1,60 @@
-param(
-  [int]$Port = 8080,
-  [string]$BindAddress = "127.0.0.1",
-  [string]$ConfigPath = (Join-Path $PSScriptRoot "config.json"),
-  [switch]$NoPingLog
-)
+<#
+Paste-friendly server script.
+
+Usage examples:
+- Paste the whole file into an interactive `pwsh` session (it will start immediately with defaults).
+- Run as a file: `pwsh -File ./server.ps1 -Port 8080`
+
+Supported args (all optional):
+-Port <int>
+-BindAddress <string>   # default: 127.0.0.1
+-ConfigPath <string>    # default: <script dir>/config.json (or <cwd>/config.json when pasted)
+-NoPingLog              # disables per-ping console logs
+#>
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if ($null -eq $args) { $args = @() }
+
+$Port = 8080
+$BindAddress = "127.0.0.1"
+$NoPingLog = $false
+
+$baseDir =
+  if ($PSScriptRoot -and (Test-Path -LiteralPath $PSScriptRoot)) { $PSScriptRoot }
+  else { (Get-Location).Path }
+
+$ConfigPath = (Join-Path $baseDir "config.json")
+
+for ($i = 0; $i -lt $args.Count; $i++) {
+  $a = [string]$args[$i]
+  switch ($a) {
+    "-Port" {
+      if ($i + 1 -ge $args.Count) { throw "Missing value for -Port" }
+      $Port = [int]$args[$i + 1]
+      $i++
+      continue
+    }
+    "-BindAddress" {
+      if ($i + 1 -ge $args.Count) { throw "Missing value for -BindAddress" }
+      $BindAddress = [string]$args[$i + 1]
+      $i++
+      continue
+    }
+    "-ConfigPath" {
+      if ($i + 1 -ge $args.Count) { throw "Missing value for -ConfigPath" }
+      $ConfigPath = [string]$args[$i + 1]
+      $i++
+      continue
+    }
+    "-NoPingLog" {
+      $NoPingLog = $true
+      continue
+    }
+    default { }
+  }
+}
 
 function Get-ConfigHosts {
   param([Parameter(Mandatory)][string]$Path)
@@ -246,8 +294,8 @@ public sealed class PingScheduler : IDisposable
 "@
 }
 
-$logEnabled = (-not $NoPingLog.IsPresent)
-$scheduler = [PingScheduler]::new([string[]]$hosts, 2000, 10000, $logEnabled)
+$logEnabled = (-not $NoPingLog)
+$scheduler = [PingScheduler]::new([string[]]$hosts, 2000, 10000, [bool]$logEnabled)
 $scheduler.Start()
 
 $listener = [System.Net.HttpListener]::new()

@@ -223,6 +223,7 @@ public sealed class PingScheduler : IDisposable
     {
         var started = DateTimeOffset.UtcNow;
         var rec = NewDefault(host);
+        string errDetail = null;
         Ping p = null;
         try
         {
@@ -241,11 +242,13 @@ public sealed class PingScheduler : IDisposable
             else
             {
                 rec.status = "error";
+                errDetail = "replyStatus=" + (reply == null ? "null" : reply.Status.ToString());
             }
         }
-        catch
+        catch (Exception ex)
         {
             rec.status = "error";
+            errDetail = ex.GetType().FullName + ": " + ex.Message;
         }
         finally
         {
@@ -260,8 +263,8 @@ public sealed class PingScheduler : IDisposable
             var atStr = rec.successedAt ?? "null";
             var elapsedMs = (long)(DateTimeOffset.UtcNow - started).TotalMilliseconds;
             Console.WriteLine(string.Format(
-                "{0:o} ping dest={1} status={2} rtt={3}ms successedAt={4} elapsedMs={5}",
-                started, host, rec.status, rttStr, atStr, elapsedMs));
+                "{0:o} ping dest={1} status={2} rtt={3}ms successedAt={4} elapsedMs={5} error={6}",
+                started, host, rec.status, rttStr, atStr, elapsedMs, errDetail ?? "null"));
         }
     }
 

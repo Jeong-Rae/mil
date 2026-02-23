@@ -9,6 +9,11 @@
   - `else { ... }`
   causing `else: The term 'else' is not recognized...` and cascading `$ConfigPath`/`$hosts` unbound errors under `Set-StrictMode -Version Latest`.
 - Existing behaviors (`-File` execution, CORS/API contract, scheduler) are unchanged.
+- Improved ping diagnostics in `server.ps1` logs:
+  - Added `error=<detail>` to each ping log line.
+  - For exceptions, logs fully-qualified exception type + message.
+  - For non-timeout/non-success replies, logs `replyStatus=<IPStatus>`.
+  - API response shape is unchanged (diagnostics are console-log only).
 
 ## 2026-02-15
 

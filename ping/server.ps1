@@ -21,9 +21,7 @@ $Port = 8080
 $BindAddress = "127.0.0.1"
 $NoPingLog = $false
 
-$baseDir =
-  if ($PSScriptRoot -and (Test-Path -LiteralPath $PSScriptRoot)) { $PSScriptRoot }
-  else { (Get-Location).Path }
+$baseDir = if ($PSScriptRoot -and (Test-Path -LiteralPath $PSScriptRoot)) { $PSScriptRoot } else { (Get-Location).Path }
 
 $ConfigPath = (Join-Path $baseDir "config.json")
 

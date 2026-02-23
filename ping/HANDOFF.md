@@ -1,5 +1,15 @@
 # Handoff
 
+## 2026-02-23
+
+- Fixed interactive paste failure in `server.ps1`: changed `$baseDir` initialization from a multiline assignment+`if/else` form to a single-line expression so `else` is not executed as a separate command when pasting into `pwsh`.
+- Root cause observed in interactive sessions: line-by-line paste could split
+  - `$baseDir =`
+  - `if (...) { ... }`
+  - `else { ... }`
+  causing `else: The term 'else' is not recognized...` and cascading `$ConfigPath`/`$hosts` unbound errors under `Set-StrictMode -Version Latest`.
+- Existing behaviors (`-File` execution, CORS/API contract, scheduler) are unchanged.
+
 ## 2026-02-15
 
 - Fixed `pwsh` crash: replaced `System.Threading.Timer` + ScriptBlock callback in `server.ps1` with a pure-.NET `PingScheduler` (C# via `Add-Type`) so the ping loop runs on background threads without requiring a PowerShell runspace.

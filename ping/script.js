@@ -11,9 +11,7 @@
 
   const qs = new URLSearchParams(location.search);
   const port = Number(qs.get("port") || "8080");
-  const host = qs.get("host") || (location.protocol === "file:" ? "localhost" : location.hostname);
-  const proto = qs.get("proto") || (location.protocol === "file:" ? "http" : location.protocol.replace(":", ""));
-  const url = `${proto}://${host}:${port}/pings`;
+  const url = `http://localhost:${port}/pings`;
   el.ep.textContent = url;
 
   let timer = null;
@@ -53,6 +51,9 @@
 
   const run = async () => {
     try {
+      if (location.protocol !== "file:") {
+        throw new Error("Open this page with file://");
+      }
       el.fs.textContent = "Fetching...";
       el.fs.className = "";
       const res = await fetch(url, { method: "GET" });

@@ -33,6 +33,14 @@
   - `script.js` no longer hardcodes `http://localhost:${port}/pings`.
   - It now derives host/protocol from page context (`location`) and supports overrides via query params (`?host=...&proto=...&port=...`).
   - Prevents `ERR_CONNECTION_REFUSED` when browser and PowerShell server are not in the same localhost namespace.
+- Added Codespaces/GitHub port-forwarding aware endpoint logic in `script.js`:
+  - Detects `*.app.github.dev` host pattern and rewrites to `...-<apiPort>.app.github.dev` instead of appending `:<port>`.
+  - Example fix: avoids broken `...-5500.app.github.dev:8080/pings` and generates `...-8080.app.github.dev/pings`.
+  - Added `?api=<full-url>` override for explicit endpoint control.
+- Per user direction, simplified frontend back to `file://`-only usage:
+  - `script.js` endpoint is fixed to `http://localhost:${port}/pings`.
+  - Added explicit guard error when opened over non-`file:` protocol (`Open this page with file://`).
+  - Removed remote/codespaces endpoint auto-detection logic.
 
 ## 2026-02-15
 

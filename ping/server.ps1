@@ -61,7 +61,7 @@ function Main {
   if ($null -eq $Argv) { $Argv = @() }
 
   $Port = 8080
-  $Bind = "127.0.0.1"
+  $Bind = "localhost"
   $NoPingLog = $false
   $base = if ($PSScriptRoot -and (Test-Path -LiteralPath $PSScriptRoot)) { $PSScriptRoot } else { (Get-Location).Path }
   $CfgPath = (Join-Path $base "config.json")

@@ -28,6 +28,11 @@
   - `style.css`: renamed selectors to match compact HTML and compressed rule formatting while preserving Confluence-like visual style.
   - Verified `script.js` syntax parse (`node --check`) and HTML/JS id wiring.
 - Reformatted `style.css` back to readable block-style formatting (non-minified) while keeping the compact selector names used by current `index.html`/`script.js`.
+- Changed default server bind address in `server.ps1` from `127.0.0.1` to `localhost` to match frontend endpoint usage and reduce host-header mismatch (`localhost` vs `127.0.0.1`) during local testing.
+- Fixed frontend endpoint resolution for non-local browser contexts:
+  - `script.js` no longer hardcodes `http://localhost:${port}/pings`.
+  - It now derives host/protocol from page context (`location`) and supports overrides via query params (`?host=...&proto=...&port=...`).
+  - Prevents `ERR_CONNECTION_REFUSED` when browser and PowerShell server are not in the same localhost namespace.
 
 ## 2026-02-15
 

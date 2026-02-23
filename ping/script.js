@@ -11,7 +11,9 @@
 
   const qs = new URLSearchParams(location.search);
   const port = Number(qs.get("port") || "8080");
-  const url = `http://localhost:${port}/pings`;
+  const host = qs.get("host") || (location.protocol === "file:" ? "localhost" : location.hostname);
+  const proto = qs.get("proto") || (location.protocol === "file:" ? "http" : location.protocol.replace(":", ""));
+  const url = `${proto}://${host}:${port}/pings`;
   el.ep.textContent = url;
 
   let timer = null;

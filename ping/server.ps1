@@ -1,60 +1,7 @@
-<#
-Paste-friendly server script.
-
-Usage examples:
-- Paste the whole file into an interactive `pwsh` session (it will start immediately with defaults).
-- Run as a file: `pwsh -File ./server.ps1 -Port 8080`
-
-Supported args (all optional):
--Port <int>
--BindAddress <string>   # default: 127.0.0.1
--ConfigPath <string>    # default: <script dir>/config.json (or <cwd>/config.json when pasted)
--NoPingLog              # disables per-ping console logs
-#>
-
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-if ($null -eq $args) { $args = @() }
-
-$Port = 8080
-$BindAddress = "127.0.0.1"
-$NoPingLog = $false
-
-$baseDir = if ($PSScriptRoot -and (Test-Path -LiteralPath $PSScriptRoot)) { $PSScriptRoot } else { (Get-Location).Path }
-
-$ConfigPath = (Join-Path $baseDir "config.json")
-
-for ($i = 0; $i -lt $args.Count; $i++) {
-  $a = [string]$args[$i]
-  switch ($a) {
-    "-Port" {
-      if ($i + 1 -ge $args.Count) { throw "Missing value for -Port" }
-      $Port = [int]$args[$i + 1]
-      $i++
-      continue
-    }
-    "-BindAddress" {
-      if ($i + 1 -ge $args.Count) { throw "Missing value for -BindAddress" }
-      $BindAddress = [string]$args[$i + 1]
-      $i++
-      continue
-    }
-    "-ConfigPath" {
-      if ($i + 1 -ge $args.Count) { throw "Missing value for -ConfigPath" }
-      $ConfigPath = [string]$args[$i + 1]
-      $i++
-      continue
-    }
-    "-NoPingLog" {
-      $NoPingLog = $true
-      continue
-    }
-    default { }
-  }
-}
-
-function Get-ConfigHosts {
+function GetHosts {
   param([Parameter(Mandatory)][string]$Path)
 
   if (-not (Test-Path -LiteralPath $Path)) {
@@ -73,14 +20,13 @@ function Get-ConfigHosts {
   return $hosts
 }
 
-function Write-JsonResponse {
+function SendJson {
   param(
     [Parameter(Mandatory)]$Context,
     [Parameter(Mandatory)]$BodyObj,
     [int]$StatusCode = 200
   )
 
-  # -Compress is not available in all PowerShell editions.
   $json = $BodyObj | ConvertTo-Json -Depth 6
   $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
 
@@ -88,17 +34,14 @@ function Write-JsonResponse {
   $res.StatusCode = $StatusCode
   $res.ContentType = "application/json; charset=utf-8"
   $res.ContentLength64 = $bytes.Length
-
-  # CORS (for file://)
   $res.Headers["Access-Control-Allow-Origin"] = "*"
   $res.Headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
   $res.Headers["Access-Control-Allow-Headers"] = "Content-Type"
-
   $res.OutputStream.Write($bytes, 0, $bytes.Length)
   $res.OutputStream.Close()
 }
 
-function Write-EmptyResponse {
+function SendEmpty {
   param(
     [Parameter(Mandatory)]$Context,
     [int]$StatusCode = 204
@@ -106,26 +49,55 @@ function Write-EmptyResponse {
 
   $res = $Context.Response
   $res.StatusCode = $StatusCode
-
-  # CORS (for file://)
   $res.Headers["Access-Control-Allow-Origin"] = "*"
   $res.Headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
   $res.Headers["Access-Control-Allow-Headers"] = "Content-Type"
-
   $res.OutputStream.Close()
 }
 
-$hosts = Get-ConfigHosts -Path $ConfigPath
+function Main {
+  param([string[]]$Argv)
 
-<#
-Why we don't use System.Threading.Timer with ScriptBlocks:
-- In PowerShell 7 (pwsh), Timer callbacks run on ThreadPool threads that do not have a PowerShell runspace.
-- Executing a ScriptBlock there commonly crashes with:
-  "There is no Runspace available to run scripts in this thread."
-To stay cross-platform and stable, run the scheduler logic in pure .NET (no ScriptBlock callbacks).
-#>
-if (-not ("PingScheduler" -as [type])) {
-  Add-Type -Language CSharp -TypeDefinition @"
+  if ($null -eq $Argv) { $Argv = @() }
+
+  $Port = 8080
+  $Bind = "127.0.0.1"
+  $NoPingLog = $false
+  $base = if ($PSScriptRoot -and (Test-Path -LiteralPath $PSScriptRoot)) { $PSScriptRoot } else { (Get-Location).Path }
+  $CfgPath = (Join-Path $base "config.json")
+
+  for ($i = 0; $i -lt $Argv.Count; $i++) {
+    $a = [string]$Argv[$i]
+    switch ($a) {
+      "-Port" {
+        if ($i + 1 -ge $Argv.Count) { throw "Missing value for -Port" }
+        $Port = [int]$Argv[$i + 1]
+        $i++
+        continue
+      }
+      "-BindAddress" {
+        if ($i + 1 -ge $Argv.Count) { throw "Missing value for -BindAddress" }
+        $Bind = [string]$Argv[$i + 1]
+        $i++
+        continue
+      }
+      "-ConfigPath" {
+        if ($i + 1 -ge $Argv.Count) { throw "Missing value for -ConfigPath" }
+        $CfgPath = [string]$Argv[$i + 1]
+        $i++
+        continue
+      }
+      "-NoPingLog" {
+        $NoPingLog = $true
+        continue
+      }
+      default { }
+    }
+  }
+
+  $hosts = GetHosts -Path $CfgPath
+  if (-not ("PingScheduler" -as [type])) {
+    Add-Type -Language CSharp -TypeDefinition @"
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -138,8 +110,8 @@ public sealed class PingRecord
 {
     public string dest { get; set; }
     public int? rtt { get; set; }
-    public string status { get; set; } // success | timeout | error
-    public string successedAt { get; set; } // ISO8601 or null
+    public string status { get; set; }
+    public string successedAt { get; set; }
 }
 
 public sealed class PingScheduler : IDisposable
@@ -187,13 +159,11 @@ public sealed class PingScheduler : IDisposable
     public void Start()
     {
         if (_timer != null) return;
-        // Fire immediately, then every interval.
         _timer = new Timer(Tick, null, 0, _intervalMs);
     }
 
     private void Tick(object state)
     {
-        // Avoid overlapping ticks.
         if (Interlocked.Exchange(ref _inTick, 1) == 1) return;
         try
         {
@@ -205,12 +175,10 @@ public sealed class PingScheduler : IDisposable
                     var hostCopy = h;
                     tasks.Add(Task.Run(() => PingOne(hostCopy)));
                 }
-                // Keep the tick bounded (interval is 10s by spec).
                 Task.WaitAll(tasks.ToArray(), 9000);
             }
             catch
             {
-                // Ignore scheduler-level errors.
             }
         }
         finally
@@ -293,88 +261,88 @@ public sealed class PingScheduler : IDisposable
     }
 }
 "@
-}
-
-$logEnabled = (-not $NoPingLog)
-$scheduler = [PingScheduler]::new([string[]]$hosts, 2000, 10000, [bool]$logEnabled)
-$scheduler.Start()
-
-$listener = [System.Net.HttpListener]::new()
-$prefix = "http://$BindAddress`:$Port/"
-$listener.Prefixes.Add($prefix)
-
-Write-Host "Ping Monitor server listening on $prefix"
-Write-Host "Config: $ConfigPath"
-Write-Host ("Hosts: " + ($hosts -join ", "))
-
-try {
-  $listener.Start()
-} catch {
-  Write-Error ("Failed to start HttpListener for {0}: {1} (On Windows you may need admin or a URL ACL reservation; on some Linux/containers binding can be blocked.)" -f $prefix, $_.Exception.Message)
-  throw
-}
-
-try {
-  while ($listener.IsListening) {
-    $ctx = $listener.GetContext()
-    $req = $ctx.Request
-
-    # Always add CORS headers even for error paths.
-    if ($req.HttpMethod -eq "OPTIONS") {
-      Write-EmptyResponse -Context $ctx -StatusCode 200
-      continue
-    }
-
-    if ($req.HttpMethod -ne "GET") {
-      Write-EmptyResponse -Context $ctx -StatusCode 405
-      continue
-    }
-
-    $path = $req.Url.AbsolutePath
-
-    if ($path -eq "/pings") {
-      $arr = $scheduler.GetAllInConfigOrder()
-      Write-JsonResponse -Context $ctx -BodyObj $arr -StatusCode 200
-      continue
-    }
-
-    if ($path -eq "/ping") {
-      $hostQ = $req.QueryString["host"]
-      if ([string]::IsNullOrWhiteSpace($hostQ)) {
-        Write-EmptyResponse -Context $ctx -StatusCode 400
-        continue
-      }
-
-      if (-not ($hosts -contains $hostQ)) {
-        Write-EmptyResponse -Context $ctx -StatusCode 404
-        continue
-      }
-
-      $rec = $scheduler.GetRecord($hostQ)
-
-      if ($null -eq $rec) {
-        Write-EmptyResponse -Context $ctx -StatusCode 404
-        continue
-      }
-
-      Write-JsonResponse -Context $ctx -BodyObj $rec -StatusCode 200
-      continue
-    }
-
-    # Optional: simple health page.
-    $ctx.Response.StatusCode = 200
-    $ctx.Response.ContentType = "text/plain; charset=utf-8"
-    $ctx.Response.Headers["Access-Control-Allow-Origin"] = "*"
-    $ctx.Response.Headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
-    $ctx.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type"
-    $msg = [System.Text.Encoding]::UTF8.GetBytes("OK`nTry GET /pings")
-    $ctx.Response.OutputStream.Write($msg, 0, $msg.Length)
-    $ctx.Response.OutputStream.Close()
   }
-} finally {
-  if ($null -ne $scheduler) { $scheduler.Dispose() }
-  if ($null -ne $listener) {
-    try { $listener.Stop() } catch {}
-    try { $listener.Close() } catch {}
+
+  $logEnabled = (-not $NoPingLog)
+  $scheduler = [PingScheduler]::new([string[]]$hosts, 2000, 10000, [bool]$logEnabled)
+  $scheduler.Start()
+
+  $listener = [System.Net.HttpListener]::new()
+  $prefix = "http://$Bind`:$Port/"
+  $listener.Prefixes.Add($prefix)
+
+  Write-Host "Server: $prefix"
+  Write-Host "Config: $CfgPath"
+  Write-Host ("Hosts: " + ($hosts -join ", "))
+
+  try {
+    $listener.Start()
+  } catch {
+    Write-Error ("Listen failed {0}: {1}" -f $prefix, $_.Exception.Message)
+    throw
+  }
+
+  try {
+    while ($listener.IsListening) {
+      $ctx = $listener.GetContext()
+      $req = $ctx.Request
+
+      if ($req.HttpMethod -eq "OPTIONS") {
+        SendEmpty -Context $ctx -StatusCode 200
+        continue
+      }
+
+      if ($req.HttpMethod -ne "GET") {
+        SendEmpty -Context $ctx -StatusCode 405
+        continue
+      }
+
+      $path = $req.Url.AbsolutePath
+
+      if ($path -eq "/pings") {
+        $arr = $scheduler.GetAllInConfigOrder()
+        SendJson -Context $ctx -BodyObj $arr -StatusCode 200
+        continue
+      }
+
+      if ($path -eq "/ping") {
+        $hostQ = $req.QueryString["host"]
+        if ([string]::IsNullOrWhiteSpace($hostQ)) {
+          SendEmpty -Context $ctx -StatusCode 400
+          continue
+        }
+
+        if (-not ($hosts -contains $hostQ)) {
+          SendEmpty -Context $ctx -StatusCode 404
+          continue
+        }
+
+        $rec = $scheduler.GetRecord($hostQ)
+        if ($null -eq $rec) {
+          SendEmpty -Context $ctx -StatusCode 404
+          continue
+        }
+
+        SendJson -Context $ctx -BodyObj $rec -StatusCode 200
+        continue
+      }
+
+      $ctx.Response.StatusCode = 200
+      $ctx.Response.ContentType = "text/plain; charset=utf-8"
+      $ctx.Response.Headers["Access-Control-Allow-Origin"] = "*"
+      $ctx.Response.Headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+      $ctx.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type"
+      $msg = [System.Text.Encoding]::UTF8.GetBytes("OK`nTry GET /pings")
+      $ctx.Response.OutputStream.Write($msg, 0, $msg.Length)
+      $ctx.Response.OutputStream.Close()
+    }
+  } finally {
+    if ($null -ne $scheduler) { $scheduler.Dispose() }
+    if ($null -ne $listener) {
+      try { $listener.Stop() } catch {}
+      try { $listener.Close() } catch {}
+    }
   }
 }
+
+Main -Argv $args

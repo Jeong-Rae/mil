@@ -14,6 +14,20 @@
   - For exceptions, logs fully-qualified exception type + message.
   - For non-timeout/non-success replies, logs `replyStatus=<IPStatus>`.
   - API response shape is unchanged (diagnostics are console-log only).
+- Refactored `server.ps1` for manual typing in isolated environments:
+  - Removed long explanatory comments and non-essential inline comments.
+  - Shortened internal function/variable names (`GetHosts`, `SendJson`, `SendEmpty`, `$Bind`, `$CfgPath`, `$base`) while keeping CLI args unchanged (`-BindAddress`, `-ConfigPath`).
+  - Simplified startup log/error text to reduce typing burden.
+  - Behavior/API contract unchanged.
+- Wrapped runtime flow into `Main` in `server.ps1` and moved execution to the final `Main -Argv $args` call.
+  - Prevents partial execution while users are still pasting/typing code in interactive `pwsh`.
+  - Preserves both usage modes: interactive paste and `pwsh -File`.
+- Applied the same manual-typing optimization to frontend files:
+  - `index.html`: shortened ids/classes and removed optional footer/help text.
+  - `script.js`: shortened variable/function names, kept behavior (initial fetch + 10s polling + refresh button + auto-refresh toggle).
+  - `style.css`: renamed selectors to match compact HTML and compressed rule formatting while preserving Confluence-like visual style.
+  - Verified `script.js` syntax parse (`node --check`) and HTML/JS id wiring.
+- Reformatted `style.css` back to readable block-style formatting (non-minified) while keeping the compact selector names used by current `index.html`/`script.js`.
 
 ## 2026-02-15
 

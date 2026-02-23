@@ -1,127 +1,77 @@
 (() => {
-  const $ = (sel) => document.querySelector(sel);
+  const q = (s) => document.querySelector(s);
+  const el = {
+    rows: q("#rows"),
+    lf: q("#lf"),
+    fs: q("#fs"),
+    ep: q("#ep"),
+    rf: q("#rf"),
+    ar: q("#ar")
+  };
 
-  const rowsEl = $("#rows");
-  const lastFetchEl = $("#lastFetch");
-  const fetchStatusEl = $("#fetchStatus");
-  const endpointTextEl = $("#endpointText");
-  const refreshBtn = $("#refreshNow");
-  const autoRefreshEl = $("#autoRefresh");
-
-  const qs = new URLSearchParams(window.location.search);
+  const qs = new URLSearchParams(location.search);
   const port = Number(qs.get("port") || "8080");
-  const baseUrl = `http://localhost:${port}`;
-  const endpoint = `${baseUrl}/pings`;
+  const url = `http://localhost:${port}/pings`;
+  el.ep.textContent = url;
 
-  endpointTextEl.textContent = endpoint;
+  let timer = null;
+  let okAt = null;
 
-  let intervalId = null;
-  let lastGoodFetchAt = null;
+  const fmt = (v) => {
+    if (!v) return "—";
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString();
+  };
 
-  function fmtLocal(iso) {
-    if (!iso) return "—";
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "—";
-    return d.toLocaleString();
-  }
-
-  function escapeHtml(s) {
-    return String(s)
+  const h = (v) =>
+    String(v)
       .replaceAll("&", "&amp;")
       .replaceAll("<", "&lt;")
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#039;");
-  }
 
-  function statusBadge(status) {
-    const cls =
-      status === "success"
-        ? "badge success"
-        : status === "timeout"
-          ? "badge timeout"
-          : "badge error";
-    const label = status || "error";
-    return `<span class="${cls}">${escapeHtml(label)}</span>`;
-  }
+  const badge = (s) => `<span class="b ${s === "success" ? "s" : s === "timeout" ? "t" : "x"}">${h(s || "error")}</span>`;
 
-  function render(data) {
-    const now = new Date();
-    const lastUpdated = now.toLocaleString();
-
-    if (!Array.isArray(data) || data.length === 0) {
-      rowsEl.innerHTML = `<tr><td colspan="5" class="empty">No data.</td></tr>`;
+  const draw = (arr) => {
+    const now = h(new Date().toLocaleString());
+    if (!Array.isArray(arr) || arr.length === 0) {
+      el.rows.innerHTML = `<tr><td colspan="5" class="e">No data.</td></tr>`;
       return;
     }
+    el.rows.innerHTML = arr.map((r) => `
+      <tr>
+        <td class="mono">${h(r?.dest ?? "—")}</td>
+        <td>${badge(r?.status)}</td>
+        <td class="num">${r?.rtt == null ? "—" : h(String(r.rtt))}</td>
+        <td>${h(fmt(r?.successedAt))}</td>
+        <td>${now}</td>
+      </tr>`).join("");
+  };
 
-    rowsEl.innerHTML = data
-      .map((r) => {
-        const dest = escapeHtml(r?.dest ?? "—");
-        const status = statusBadge(r?.status);
-        const rtt = r?.rtt == null ? "—" : escapeHtml(String(r.rtt));
-        const succeededAt = escapeHtml(fmtLocal(r?.successedAt));
-        return `
-          <tr>
-            <td class="mono">${dest}</td>
-            <td>${status}</td>
-            <td class="num">${rtt}</td>
-            <td>${succeededAt}</td>
-            <td>${escapeHtml(lastUpdated)}</td>
-          </tr>
-        `;
-      })
-      .join("");
-  }
-
-  async function fetchAndRender() {
+  const run = async () => {
     try {
-      fetchStatusEl.textContent = "Fetching...";
-      fetchStatusEl.className = "meta-value";
-
-      const res = await fetch(endpoint, { method: "GET" });
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-      const data = await res.json();
-
-      render(data);
-
-      lastGoodFetchAt = new Date();
-      lastFetchEl.textContent = lastGoodFetchAt.toLocaleString();
-      fetchStatusEl.textContent = "OK";
-      fetchStatusEl.className = "meta-value ok";
+      el.fs.textContent = "Fetching...";
+      el.fs.className = "";
+      const res = await fetch(url, { method: "GET" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      draw(await res.json());
+      okAt = new Date();
+      el.lf.textContent = okAt.toLocaleString();
+      el.fs.textContent = "OK";
+      el.fs.className = "ok";
     } catch (e) {
-      fetchStatusEl.textContent = `Error: ${e && e.message ? e.message : String(e)}`;
-      fetchStatusEl.className = "meta-value bad";
-
-      if (lastGoodFetchAt) {
-        lastFetchEl.textContent = lastGoodFetchAt.toLocaleString();
-      } else {
-        lastFetchEl.textContent = "—";
-      }
+      el.fs.textContent = `Error: ${e?.message || String(e)}`;
+      el.fs.className = "bad";
+      el.lf.textContent = okAt ? okAt.toLocaleString() : "—";
     }
-  }
+  };
 
-  function start() {
-    stop();
-    intervalId = window.setInterval(fetchAndRender, 10000);
-  }
+  const start = () => { stop(); timer = setInterval(run, 10000); };
+  const stop = () => { if (timer != null) { clearInterval(timer); timer = null; } };
 
-  function stop() {
-    if (intervalId != null) {
-      window.clearInterval(intervalId);
-      intervalId = null;
-    }
-  }
-
-  refreshBtn.addEventListener("click", () => void fetchAndRender());
-  autoRefreshEl.addEventListener("change", () => {
-    if (autoRefreshEl.checked) start();
-    else stop();
-  });
-
-  // Initial fetch on load, then start interval.
-  void fetchAndRender();
+  el.rf.addEventListener("click", () => void run());
+  el.ar.addEventListener("change", () => (el.ar.checked ? start() : stop()));
+  void run();
   start();
 })();
-

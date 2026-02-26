@@ -1,5 +1,70 @@
 # Handoff
 
+## 2026-02-26
+
+- Fixed worker silent-stop issue in `server.ps1` logging:
+  - Root cause: inline `WriteLine("{...}" -f ...)` formatting path in worker raised runtime format exception.
+  - Change: build `$logLine` first with `-f`, then call `[Console]::WriteLine($logLine)`.
+  - Result: worker no longer dies on first log write; ping logs continue as expected.
+
+- Updated ping logging policy in `server.ps1`:
+  - Replaced worker flag semantics from "disable all logs" to "include success logs".
+  - `LogSuccess = $true`: logs success + failure.
+  - `LogSuccess = $false`: logs failure only.
+  - Implemented via `shouldLog = (status != success) OR IncludeSuccessLog`.
+
+- Fixed PowerShell automatic variable collision in `server.ps1`:
+  - Replaced loop variable `$host` and parameter `$Host` usages with `$dest` / `-Dest`.
+  - Resolved runtime error: `Cannot overwrite variable Host because it is read-only or constant.`
+  - Kept API behavior and record schema unchanged.
+
+- `server.ps1` scheduler migration completed on latest edited file:
+  - Removed C# `Add-Type` / `PingScheduler` dependency.
+  - Added pure PowerShell worker runspace (`StartPingWorker` / `StopPingWorker`) running a 10s loop (`Ping.Send(host, 2000)` per host).
+  - Kept in-memory latest-record model (`dest/rtt/status/successedAt`) and API shape (`/pings`, `/ping`) intact.
+  - Added thread-safe shared state via synchronized hashtables for cross-runspace read/write.
+- Listener conflict/cleanup hardening:
+  - Added explicit guidance log when `HttpListener.Start()` fails (possible existing process on same bind/port).
+  - Ensured worker/runspace is stopped in `finally` even when listener start/runtime fails.
+- Validation:
+  - `server.ps1` parser check passed (`PARSE_OK`).
+
+- 경로 기준 변경:
+  - `server.ps1`의 `config.json` 탐색 기준을 스크립트 위치(`$PSScriptRoot`)에서 실행 위치(`cwd`)로 변경.
+  - `$CfgPath = Join-Path (Get-Location).Path "config.json"` 형태로 고정.
+  - 파서 검사 결과 `PARSE_OK`.
+
+- 주석 정리:
+  - `server.ps1`에서 입력 가이드 주석 4개(`Port`, `BindAddress`, `NoPingLog`, `ConfigPath`)만 남기고 나머지 주석 제거.
+  - `Add-Type` C# 블록 내 타입/함수 설명 주석도 모두 제거.
+  - 정리 후 파서 검사 결과 `PARSE_OK`.
+
+- 사용자 의도 보정 반영:
+  - `server.ps1`의 `Main` 설정 변수 주석을 타입 설명에서 입력 가이드 형식으로 변경.
+  - 예시 포함: `Port 입력, e.g: 8080`, `BindAddress 입력, e.g: localhost`, `ConfigPath 입력, e.g: ./config.json`.
+
+- `server.ps1`의 가독성 보강:
+  - PowerShell 함수 선언 위에 함수 시그니처/반환 형태를 한 줄 주석으로 추가.
+  - PowerShell 변수 선언 위에 예상 타입 한 줄 주석을 추가.
+  - `Add-Type` C# 블록 내 주요 필드/로컬 변수/메서드에도 타입 주석을 추가.
+- 수정 후 `server.ps1` 파서 검사 결과 `PARSE_OK` 확인.
+
+- `server.ps1`에서 `Main -Argv $args` 호출과 `Main` 내부 인자 파싱(`-Port`, `-BindAddress`, `-ConfigPath`, `-NoPingLog`)을 제거함.
+  - 포트/바인드/설정파일 경로/로그 여부는 실행시 주입하지 않고 스크립트 내부 변수로만 관리하도록 고정.
+- 입력 형식 검증 단순화:
+  - `GetHosts`의 `config.json` 존재/형식/빈 배열 검증 분기 제거.
+  - `/ping` API의 `host` 공백/누락(400) 검증 제거 후, 구성 host 포함 여부만 확인(미포함 시 404).
+- `server.ps1` 파서 검사 수행: `PARSE_OK`.
+
+- Discussed pure PowerShell 5.1 scheduler options without C# (`Add-Type`) and compared:
+  - `Runspace + while { ping tick; Start-Sleep 10 }` (recommended for stability/operability).
+  - `System.Threading.Timer` (possible but fragile due to runspace binding/reentrancy/cleanup complexity in PS 5.1).
+  - `System.Timers.Timer + Register-ObjectEvent` (simpler than Threading.Timer but adds event queue/cleanup overhead).
+- Agreed to prioritize "single listener instance" operation to avoid port conflicts while server is already running:
+  - Never start a second `HttpListener` on the same port.
+  - For migration, use graceful stop/start or temporary alternate port cutover.
+- No code change applied yet in this step; this entry records the implementation direction decision.
+
 ## 2026-02-23
 
 - Fixed interactive paste failure in `server.ps1`: changed `$baseDir` initialization from a multiline assignment+`if/else` form to a single-line expression so `else` is not executed as a separate command when pasting into `pwsh`.

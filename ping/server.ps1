@@ -4,20 +4,33 @@ $ErrorActionPreference = "Stop"
 function GetHosts {
   param([Parameter(Mandatory)][string]$Path)
 
-  if (-not (Test-Path -LiteralPath $Path)) {
-    throw "config.json not found: $Path"
-  }
-
   $raw = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
   $cfg = $raw | ConvertFrom-Json
-  if ($null -eq $cfg -or $null -eq $cfg.hosts) {
-    throw "Invalid config.json (missing 'hosts' array)"
+  return @($cfg.hosts | ForEach-Object { [string]$_ })
+}
+
+function NewPingRecord {
+  param([Parameter(Mandatory)][string]$Dest)
+
+  return [pscustomobject]@{
+    dest = $Dest
+    rtt = $null
+    status = "error"
+    successedAt = $null
   }
-  $hosts = @($cfg.hosts | ForEach-Object { [string]$_ })
-  if ($hosts.Count -eq 0) {
-    throw "Invalid config.json ('hosts' must be a non-empty array)"
+}
+
+function CopyPingRecord {
+  param(
+    [Parameter(Mandatory)]$Record
+  )
+
+  return [pscustomobject]@{
+    dest = [string]$Record.dest
+    rtt = $Record.rtt
+    status = [string]$Record.status
+    successedAt = $Record.successedAt
   }
-  return $hosts
 }
 
 function SendJson {
@@ -55,217 +68,161 @@ function SendEmpty {
   $res.OutputStream.Close()
 }
 
-function Main {
-  param([string[]]$Argv)
+function StartPingWorker {
+  param(
+    [Parameter(Mandatory)]$Shared,
+    [Parameter(Mandatory)][bool]$LogSuccess
+  )
 
-  if ($null -eq $Argv) { $Argv = @() }
+  $pingLoop = {
+    param($SharedState, [bool]$IncludeSuccessLog)
 
-  $Port = 8080
-  $Bind = "localhost"
-  $NoPingLog = $false
-  $base = if ($PSScriptRoot -and (Test-Path -LiteralPath $PSScriptRoot)) { $PSScriptRoot } else { (Get-Location).Path }
-  $CfgPath = (Join-Path $base "config.json")
+    Set-StrictMode -Version Latest
+    $ErrorActionPreference = "Stop"
 
-  for ($i = 0; $i -lt $Argv.Count; $i++) {
-    $a = [string]$Argv[$i]
-    switch ($a) {
-      "-Port" {
-        if ($i + 1 -ge $Argv.Count) { throw "Missing value for -Port" }
-        $Port = [int]$Argv[$i + 1]
-        $i++
-        continue
+    while (-not $SharedState.Stop) {
+      $tickStarted = [DateTimeOffset]::UtcNow
+
+      foreach ($dest in $SharedState.Hosts) {
+        if ($SharedState.Stop) { break }
+
+        $started = [DateTimeOffset]::UtcNow
+        $record = [pscustomobject]@{
+          dest = $dest
+          rtt = $null
+          status = "error"
+          successedAt = $null
+        }
+        $errorDetail = $null
+        $ping = $null
+
+        try {
+          $ping = New-Object System.Net.NetworkInformation.Ping
+          $reply = $ping.Send($dest, 2000)
+
+          if ($null -ne $reply -and $reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success) {
+            $record.status = "success"
+            $record.rtt = [int]$reply.RoundtripTime
+            $record.successedAt = [DateTimeOffset]::UtcNow.ToString("o")
+          } elseif ($null -ne $reply -and $reply.Status -eq [System.Net.NetworkInformation.IPStatus]::TimedOut) {
+            $record.status = "timeout"
+          } else {
+            $record.status = "error"
+            $errorDetail = "replyStatus=" + $(if ($null -eq $reply) { "null" } else { $reply.Status.ToString() })
+          }
+        } catch {
+          $record.status = "error"
+          $errorDetail = $_.Exception.GetType().FullName + ": " + $_.Exception.Message
+        } finally {
+          if ($null -ne $ping) { $ping.Dispose() }
+        }
+
+        $SharedState.Records[$dest] = $record
+
+        $shouldLog = ($record.status -ne "success") -or $IncludeSuccessLog
+        if ($shouldLog) {
+          $rttStr = if ($null -eq $record.rtt) { "null" } else { [string]$record.rtt }
+          $atStr = if ([string]::IsNullOrWhiteSpace([string]$record.successedAt)) { "null" } else { [string]$record.successedAt }
+          $elapsedMs = [long]([DateTimeOffset]::UtcNow - $started).TotalMilliseconds
+          $logLine = "{0:o} ping dest={1} status={2} rtt={3}ms successedAt={4} elapsedMs={5} error={6}" -f `
+            $started, $dest, $record.status, $rttStr, $atStr, $elapsedMs, $(if ($null -eq $errorDetail) { "null" } else { $errorDetail })
+          [Console]::WriteLine($logLine)
+        }
       }
-      "-BindAddress" {
-        if ($i + 1 -ge $Argv.Count) { throw "Missing value for -BindAddress" }
-        $Bind = [string]$Argv[$i + 1]
-        $i++
-        continue
+
+      $elapsedTickMs = [int]([DateTimeOffset]::UtcNow - $tickStarted).TotalMilliseconds
+      $sleepMs = 1000 - $elapsedTickMs
+      if ($sleepMs -lt 0) { $sleepMs = 0 }
+
+      while ($sleepMs -gt 0 -and -not $SharedState.Stop) {
+        $chunk = [Math]::Min($sleepMs, 500)
+        Start-Sleep -Milliseconds $chunk
+        $sleepMs -= $chunk
       }
-      "-ConfigPath" {
-        if ($i + 1 -ge $Argv.Count) { throw "Missing value for -ConfigPath" }
-        $CfgPath = [string]$Argv[$i + 1]
-        $i++
-        continue
-      }
-      "-NoPingLog" {
-        $NoPingLog = $true
-        continue
-      }
-      default { }
     }
   }
+
+  $workerRunspace = [RunspaceFactory]::CreateRunspace()
+  $workerRunspace.ApartmentState = [System.Threading.ApartmentState]::MTA
+  $workerRunspace.ThreadOptions = [System.Management.Automation.Runspaces.PSThreadOptions]::ReuseThread
+  $workerRunspace.Open()
+
+  $workerPowerShell = [PowerShell]::Create()
+  $workerPowerShell.Runspace = $workerRunspace
+  $null = $workerPowerShell.AddScript($pingLoop.ToString()).AddArgument($Shared).AddArgument($LogSuccess)
+
+  $workerHandle = $workerPowerShell.BeginInvoke()
+
+  return [pscustomobject]@{
+    Runspace = $workerRunspace
+    PowerShell = $workerPowerShell
+    Handle = $workerHandle
+  }
+}
+
+function StopPingWorker {
+  param($Worker, $Shared)
+
+  if ($null -ne $Shared) {
+    $Shared.Stop = $true
+  }
+
+  if ($null -eq $Worker) { return }
+
+  $completed = $true
+  try {
+    if ($null -ne $Worker.Handle) {
+      $completed = $Worker.Handle.IsCompleted
+      if (-not $completed) {
+        $completed = $Worker.Handle.AsyncWaitHandle.WaitOne(3000)
+      }
+    }
+  } catch {
+    $completed = $false
+  }
+
+  try {
+    if ($null -ne $Worker.PowerShell) {
+      if (-not $completed) {
+        try { $Worker.PowerShell.Stop() } catch {}
+      }
+      if ($null -ne $Worker.Handle) {
+        try { $null = $Worker.PowerShell.EndInvoke($Worker.Handle) } catch {}
+      }
+      $Worker.PowerShell.Dispose()
+    }
+  } finally {
+    if ($null -ne $Worker.Runspace) {
+      try { $Worker.Runspace.Close() } catch {}
+      $Worker.Runspace.Dispose()
+    }
+  }
+}
+
+function Main {
+  # Port 입력, e.g: 8080
+  $Port = 8080
+  # BindAddress 입력, e.g: localhost
+  $Bind = "localhost"
+  # 성공 로그 포함 여부 입력, e.g: $false (true=성공+실패, false=실패만)
+  $LogSuccess = $true
+  # ConfigPath 입력, e.g: (cwd)/config.json
+  $CfgPath = (Join-Path (Get-Location).Path "config.json")
 
   $hosts = GetHosts -Path $CfgPath
-  if (-not ("PingScheduler" -as [type])) {
-    Add-Type -Language CSharp -TypeDefinition @"
-using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net.NetworkInformation;
-using System.Threading;
-using System.Threading.Tasks;
 
-public sealed class PingRecord
-{
-    public string dest { get; set; }
-    public int? rtt { get; set; }
-    public string status { get; set; }
-    public string successedAt { get; set; }
-}
-
-public sealed class PingScheduler : IDisposable
-{
-    private readonly List<string> _hosts;
-    private readonly ConcurrentDictionary<string, PingRecord> _records;
-    private readonly int _timeoutMs;
-    private readonly int _intervalMs;
-    private readonly bool _log;
-    private int _inTick;
-    private Timer _timer;
-
-    public PingScheduler(IEnumerable<string> hosts, int timeoutMs, int intervalMs, bool log)
-    {
-        _hosts = hosts.Select(h => h ?? "").ToList();
-        _timeoutMs = timeoutMs;
-        _intervalMs = intervalMs;
-        _log = log;
-        _records = new ConcurrentDictionary<string, PingRecord>();
-        foreach (var h in _hosts)
-        {
-            _records[h] = NewDefault(h);
-        }
-    }
-
-    public IReadOnlyList<string> Hosts => _hosts;
-
-    public PingRecord GetRecord(string host)
-    {
-        if (host == null) return null;
-        PingRecord rec;
-        return _records.TryGetValue(host, out rec) ? rec : null;
-    }
-
-    public PingRecord[] GetAllInConfigOrder()
-    {
-        var arr = new PingRecord[_hosts.Count];
-        for (int i = 0; i < _hosts.Count; i++)
-        {
-            arr[i] = GetRecord(_hosts[i]) ?? NewDefault(_hosts[i]);
-        }
-        return arr;
-    }
-
-    public void Start()
-    {
-        if (_timer != null) return;
-        _timer = new Timer(Tick, null, 0, _intervalMs);
-    }
-
-    private void Tick(object state)
-    {
-        if (Interlocked.Exchange(ref _inTick, 1) == 1) return;
-        try
-        {
-            try
-            {
-                var tasks = new List<Task>(_hosts.Count);
-                foreach (var h in _hosts)
-                {
-                    var hostCopy = h;
-                    tasks.Add(Task.Run(() => PingOne(hostCopy)));
-                }
-                Task.WaitAll(tasks.ToArray(), 9000);
-            }
-            catch
-            {
-            }
-        }
-        finally
-        {
-            Interlocked.Exchange(ref _inTick, 0);
-        }
-    }
-
-    private void PingOne(string host)
-    {
-        var started = DateTimeOffset.UtcNow;
-        var rec = NewDefault(host);
-        string errDetail = null;
-        Ping p = null;
-        try
-        {
-            p = new Ping();
-            var reply = p.Send(host, _timeoutMs);
-            if (reply != null && reply.Status == IPStatus.Success)
-            {
-                rec.status = "success";
-                rec.rtt = (int)reply.RoundtripTime;
-                rec.successedAt = DateTimeOffset.UtcNow.ToString("o");
-            }
-            else if (reply != null && reply.Status == IPStatus.TimedOut)
-            {
-                rec.status = "timeout";
-            }
-            else
-            {
-                rec.status = "error";
-                errDetail = "replyStatus=" + (reply == null ? "null" : reply.Status.ToString());
-            }
-        }
-        catch (Exception ex)
-        {
-            rec.status = "error";
-            errDetail = ex.GetType().FullName + ": " + ex.Message;
-        }
-        finally
-        {
-            if (p != null) p.Dispose();
-        }
-
-        _records[host] = rec;
-
-        if (_log)
-        {
-            var rttStr = rec.rtt.HasValue ? rec.rtt.Value.ToString() : "null";
-            var atStr = rec.successedAt ?? "null";
-            var elapsedMs = (long)(DateTimeOffset.UtcNow - started).TotalMilliseconds;
-            Console.WriteLine(string.Format(
-                "{0:o} ping dest={1} status={2} rtt={3}ms successedAt={4} elapsedMs={5} error={6}",
-                started, host, rec.status, rttStr, atStr, elapsedMs, errDetail ?? "null"));
-        }
-    }
-
-    private static PingRecord NewDefault(string host)
-    {
-        return new PingRecord
-        {
-            dest = host,
-            rtt = null,
-            status = "error",
-            successedAt = null
-        };
-    }
-
-    public void Stop()
-    {
-        var t = _timer;
-        _timer = null;
-        if (t == null) return;
-        try { t.Dispose(); } catch { }
-    }
-
-    public void Dispose()
-    {
-        Stop();
-    }
-}
-"@
+  $records = [hashtable]::Synchronized(@{})
+  foreach ($dest in $hosts) {
+    $records[$dest] = NewPingRecord -Dest $dest
   }
 
-  $logEnabled = (-not $NoPingLog)
-  $scheduler = [PingScheduler]::new([string[]]$hosts, 2000, 10000, [bool]$logEnabled)
-  $scheduler.Start()
+  $shared = [hashtable]::Synchronized(@{
+    Hosts = [string[]]$hosts
+    Records = $records
+    Stop = $false
+  })
+
+  $worker = StartPingWorker -Shared $shared -LogSuccess $LogSuccess
 
   $listener = [System.Net.HttpListener]::new()
   $prefix = "http://$Bind`:$Port/"
@@ -276,13 +233,14 @@ public sealed class PingScheduler : IDisposable
   Write-Host ("Hosts: " + ($hosts -join ", "))
 
   try {
-    $listener.Start()
-  } catch {
-    Write-Error ("Listen failed {0}: {1}" -f $prefix, $_.Exception.Message)
-    throw
-  }
+    try {
+      $listener.Start()
+    } catch {
+      Write-Error ("Listen failed {0}: {1}" -f $prefix, $_.Exception.Message)
+      Write-Error ("Another listener may already be running on {0}:{1}. Stop the old process or change the port." -f $Bind, $Port)
+      throw
+    }
 
-  try {
     while ($listener.IsListening) {
       $ctx = $listener.GetContext()
       $req = $ctx.Request
@@ -300,30 +258,33 @@ public sealed class PingScheduler : IDisposable
       $path = $req.Url.AbsolutePath
 
       if ($path -eq "/pings") {
-        $arr = $scheduler.GetAllInConfigOrder()
+        $arr = @()
+        foreach ($dest in $hosts) {
+          $rec = $shared.Records[$dest]
+          if ($null -eq $rec) {
+            $rec = NewPingRecord -Dest $dest
+          }
+          $arr += (CopyPingRecord -Record $rec)
+        }
+
         SendJson -Context $ctx -BodyObj $arr -StatusCode 200
         continue
       }
 
       if ($path -eq "/ping") {
         $hostQ = $req.QueryString["host"]
-        if ([string]::IsNullOrWhiteSpace($hostQ)) {
-          SendEmpty -Context $ctx -StatusCode 400
-          continue
-        }
-
         if (-not ($hosts -contains $hostQ)) {
           SendEmpty -Context $ctx -StatusCode 404
           continue
         }
 
-        $rec = $scheduler.GetRecord($hostQ)
+        $rec = $shared.Records[$hostQ]
         if ($null -eq $rec) {
           SendEmpty -Context $ctx -StatusCode 404
           continue
         }
 
-        SendJson -Context $ctx -BodyObj $rec -StatusCode 200
+        SendJson -Context $ctx -BodyObj (CopyPingRecord -Record $rec) -StatusCode 200
         continue
       }
 
@@ -337,12 +298,13 @@ public sealed class PingScheduler : IDisposable
       $ctx.Response.OutputStream.Close()
     }
   } finally {
-    if ($null -ne $scheduler) { $scheduler.Dispose() }
     if ($null -ne $listener) {
       try { $listener.Stop() } catch {}
       try { $listener.Close() } catch {}
     }
+
+    StopPingWorker -Worker $worker -Shared $shared
   }
 }
 
-Main -Argv $args
+Main

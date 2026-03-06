@@ -1,4 +1,4 @@
- HXRM-5VA64아래는 “FE는 표 중심 + 코플루언스(Atlassian) 느낌의 UI 스타일” 요구를 반영해 AI Agent에게 전달 가능한 최종 Markdown 프롬프트이다.
+ 아래는 “FE는 표 중심 + 코플루언스(Atlassian) 느낌의 UI 스타일” 요구를 반영해 AI Agent에게 전달 가능한 최종 Markdown 프롬프트이다.
 
 ---
 

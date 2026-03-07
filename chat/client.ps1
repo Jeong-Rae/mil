@@ -1,11 +1,11 @@
-$ErrorActionPreference = "Stop"
-
 param(
     [string]$Root
 )
 
+$ErrorActionPreference = "Stop"
+
 $Port = 3000
-$Prefix = "http://localhost:$Port/"
+$Prefix = "http://127.0.0.1:$Port/"
 $Routes = @{
     "/"          = @("index.html", "text/html; charset=utf-8")
     "/index.html" = @("index.html", "text/html; charset=utf-8")
@@ -13,11 +13,15 @@ $Routes = @{
     "/style.css" = @("style.css", "text/css; charset=utf-8")
 }
 
+if (-not $Root) {
+    throw "Pass the absolute static root path. Example: pwsh -F client.ps1 -Root /workspaces/mil/chat"
+}
+
 $listener = [System.Net.HttpListener]::new()
 $listener.Prefixes.Add($Prefix)
 
 Write-Host "Static client server starting..."
-Write-Host "Open: http://localhost:$Port/"
+Write-Host "Open: http://127.0.0.1:$Port/"
 Write-Host "Static root: $Root"
 Write-Host "Press Ctrl+C to stop."
 

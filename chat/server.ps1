@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 # Edit these constants directly before running on your LAN.
 $Port = 9999
-$BindAddress = "localhost"
+$BindAddress = "127.0.0.1"
 $ListenerPrefix = "http://${BindAddress}:$Port/"
 $RunspaceMax = 16
 

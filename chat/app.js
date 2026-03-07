@@ -1,4 +1,4 @@
-const SERVER_IP = "192.168.0.10";
+const SERVER_IP = "127.0.0.1";
 const SERVER_PORT = "9999";
 
 let socket = null;

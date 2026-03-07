@@ -27,6 +27,8 @@
 - 클라이언트 브라우저 전제는 최신 Chrome 으로 보고 `app.js` 는 `const` / `let` 을 사용하도록 정리했다.
 - `client.ps1` 는 helper 함수 분리를 줄이고, 파일 매핑 hashtable + 단일 listener loop만 남긴 초단순 정적 파일 서버로 다시 압축했다.
 - `client.ps1` 는 스크립트 위치를 기준으로 하지 않고, 실행 시 넘기는 정적 파일 절대경로를 그대로 루트로 사용하도록 수정했다.
+- `client.ps1` 의 `param(...)` 블록을 파일 최상단으로 옮겼다. 기존 위치는 PowerShell에서 스크립트 파라미터로 인식되지 않아 실행이 실패했다.
+- 로컬 테스트용 기본 주소는 `localhost` 대신 `127.0.0.1` 로 통일했다. `localhost` 해석 차이로 브라우저 쪽에서 `ERR_CONNECTION_REFUSED` 가 날 수 있어서 IPv4 loopback으로 고정했다.
 - CSS는 블루 톤 기반의 단순한 카드형 레이아웃으로 구성했다.
 
 ## Next Session Notes

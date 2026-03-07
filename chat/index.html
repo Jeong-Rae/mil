@@ -8,37 +8,32 @@
 </head>
 <body>
   <main class="page">
-    <section class="panel hero">
-      <p class="eyebrow">LAN WebSocket Chat</p>
-      <h1>Simple LAN Chat</h1>
-      <p class="hero-copy">브라우저에서 바로 열고, 내부망 WebSocket 서버에 직접 연결하는 최소 채팅 클라이언트입니다.</p>
-      <div class="status-row">
+    <section class="panel" id="connectPanel">
+      <div class="sectionHeader">
+        <h2>Connect</h2>
         <span id="connectionStatus" class="status-badge offline">Disconnected</span>
-        <span id="statusText" class="status-text">서버에 연결되지 않았습니다.</span>
       </div>
-    </section>
+      <p id="statusText">서버에 연결되지 않았습니다.</p>
 
-    <section class="panel">
-      <h2>Connect</h2>
-      <form id="connectForm" class="form-grid">
+      <form id="connectForm">
         <label class="field">
           <span>Name</span>
           <input id="nameInput" name="name" type="text" placeholder="alice" autocomplete="off" />
         </label>
 
-        <button id="connectButton" class="primary-button" type="submit">Connect</button>
+        <button id="connectButton" type="submit">Connect</button>
       </form>
     </section>
 
-    <section class="panel chat-panel">
-      <div class="chat-header">
+    <section class="panel" id="messagesPanel">
+      <div class="sectionHeader">
         <h2>Messages</h2>
-        <p id="chatMeta" class="chat-meta">메시지 없음</p>
+        <p id="chatMeta">메시지 없음</p>
       </div>
 
-      <ul id="messageList" class="message-list" aria-live="polite"></ul>
+      <ul id="messageList" aria-live="polite"></ul>
 
-      <form id="messageForm" class="message-form">
+      <form id="messageForm">
         <input
           id="messageInput"
           name="message"
@@ -47,7 +42,7 @@
           autocomplete="off"
           disabled
         />
-        <button id="sendButton" class="primary-button" type="submit" disabled>Send</button>
+        <button id="sendButton" type="submit" disabled>Send</button>
       </form>
     </section>
   </main>

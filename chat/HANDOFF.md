@@ -29,7 +29,10 @@
 - `client.ps1` 는 스크립트 위치를 기준으로 하지 않고, 실행 시 넘기는 정적 파일 절대경로를 그대로 루트로 사용하도록 수정했다.
 - `client.ps1` 의 `param(...)` 블록을 파일 최상단으로 옮겼다. 기존 위치는 PowerShell에서 스크립트 파라미터로 인식되지 않아 실행이 실패했다.
 - 로컬 테스트용 기본 주소는 `localhost` 대신 `127.0.0.1` 로 통일했다. `localhost` 해석 차이로 브라우저 쪽에서 `ERR_CONNECTION_REFUSED` 가 날 수 있어서 IPv4 loopback으로 고정했다.
-- CSS는 블루 톤 기반의 단순한 카드형 레이아웃으로 구성했다.
+- `style.css` 는 범용 토큰/공통 규칙 위주가 아니라, 현재 HTML에 실제로 있는 `id` 와 `class` 를 직접 선택하는 방식으로 더 단순화했다.
+- 디자인도 버튼, 입력창, 채팅 목록, 상태 표시 정도만 남기고 나머지 장식성은 거의 제거했다.
+- `index.html` 도 더 줄여서 `Connect`, `Messages` 두 영역만 남겼다. 기존 hero 영역은 제거했다.
+- 정렬은 grid보다 flex 위주로 다시 맞췄다. connect form, message form, section header 모두 flex 기준이다.
 
 ## Next Session Notes
 

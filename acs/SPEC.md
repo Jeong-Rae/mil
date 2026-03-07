@@ -154,6 +154,18 @@ powershell -ExecutionPolicy Bypass -File .\ACS.ps1 gate-1
 
 여기서 `gate-1` 이 장소 값이다.
 
+스크립트 파일 실행이 제한된 환경에서는, `ACS.ps1` 내용을 PowerShell 세션에 복사 붙여넣기한 뒤 아래처럼 함수 엔트리로 실행할 수 있어야 한다.
+
+```powershell
+Start-ACS -Place gate-1
+```
+
+현재 작업 디렉토리가 `acs` 디렉토리가 아닐 경우에는 앱 루트를 명시할 수 있어야 한다.
+
+```powershell
+Start-ACS -Place gate-1 -AppRoot C:\acs
+```
+
 ### 7.1 장소 값의 용도
 
 로그 저장 시 결과 엔트리에 포함된다.
@@ -165,6 +177,13 @@ powershell -ExecutionPolicy Bypass -File .\ACS.ps1 gate-1
 * 값이 없을 경우의 정책은 구현 단에서 단순 처리한다.
 
   * 예: `"unknown"` 또는 빈 문자열 허용
+
+### 7.3 실행 방식 지원
+
+구현은 아래 두 실행 방식을 모두 지원해야 한다.
+
+* 스크립트 파일 직접 실행
+* 스크립트 본문 복사 붙여넣기 후 함수 호출 실행
 
 ---
 
@@ -482,6 +501,7 @@ decode 결과에서 얻은 군번을 기준으로 `./list.json` 에서 장병을
 ### 19.1 정상 입영
 
 * 실행: `.\ACS.ps1 gate-1`
+* 또는: `Start-ACS -Place gate-1`
 * 입력: 입영 바코드 문자열
 * decode 결과:
 
@@ -526,4 +546,3 @@ decode 결과에서 얻은 군번을 기준으로 `./list.json` 에서 장병을
 * 바코드 알고리즘은 결정론적이면 충분하며, 1단계에서 암호학적 강도는 요구하지 않는다.
 * 코드는 PS1 / PowerShell 5 기준으로 단순하고 읽기 쉽게 유지한다.
 * 입력, decode, 중복 검사, 로그 저장의 핵심 흐름이 우선이다.
-

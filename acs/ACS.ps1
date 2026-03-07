@@ -1,17 +1,76 @@
-[CmdletBinding()]
-param(
-    [string]$Place = "unknown"
-)
+$script:AppRoot = $null
+$script:InitialInvocationName = $MyInvocation.InvocationName
+$script:InitialArguments = @($args)
 
-Set-StrictMode -Version Latest
-$ErrorActionPreference = "Stop"
+function Get-CommandPath {
+    param([object]$Command)
 
-function Get-AppRoot {
+    if ($null -eq $Command) {
+        return $null
+    }
+
+    if ($Command.PSObject.Properties.Match("Path").Count -eq 0) {
+        return $null
+    }
+
+    $path = [string]$Command.Path
+    if ([string]::IsNullOrWhiteSpace($path)) {
+        return $null
+    }
+
+    $path
+}
+
+function Resolve-InitialAppRoot {
     if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
         return $PSScriptRoot
     }
 
-    Split-Path -Parent $MyInvocation.MyCommand.Path
+    if (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+        return (Split-Path -Parent $PSCommandPath)
+    }
+
+    $scriptPath = Get-CommandPath -Command $MyInvocation.MyCommand
+    if (-not [string]::IsNullOrWhiteSpace($scriptPath)) {
+        return (Split-Path -Parent $scriptPath)
+    }
+
+    (Get-Location).Path
+}
+
+$script:InitialCommandPath = $null
+if (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+    $script:InitialCommandPath = $PSCommandPath
+}
+else {
+    $script:InitialCommandPath = Get-CommandPath -Command $MyInvocation.MyCommand
+}
+
+function Set-AppRoot {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        $script:AppRoot = (Get-Location).Path
+        return $script:AppRoot
+    }
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        throw "app root not found: $Path"
+    }
+
+    $resolved = Resolve-Path -LiteralPath $Path
+    $script:AppRoot = $resolved.Path
+    $script:AppRoot
+}
+
+$script:AppRoot = Resolve-InitialAppRoot
+
+function Get-AppRoot {
+    if ([string]::IsNullOrWhiteSpace($script:AppRoot)) {
+        $script:AppRoot = (Get-Location).Path
+    }
+
+    return $script:AppRoot
 }
 
 function Normalize-Id {
@@ -309,57 +368,111 @@ function Process-Barcode {
         ))
 }
 
-function Main {
-    param([string]$Place)
+function Start-ACS {
+    [CmdletBinding()]
+    param(
+        [string]$Place = "unknown",
+        [string]$AppRoot
+    )
 
-    $resolvedPlace = [string]$Place
-    if ([string]::IsNullOrWhiteSpace($resolvedPlace)) {
-        $resolvedPlace = "unknown"
-    }
-
-    $appRoot = Get-AppRoot
-    $listPath = Join-Path -Path $appRoot -ChildPath "list.json"
-    $logPath = Get-LogPath
+    $previousErrorActionPreference = $ErrorActionPreference
 
     try {
-        $soldierIndex = Load-SoldierList -Path $listPath
+        Set-StrictMode -Version Latest
+        $ErrorActionPreference = "Stop"
+
+        if (-not [string]::IsNullOrWhiteSpace($AppRoot)) {
+            [void](Set-AppRoot -Path $AppRoot)
+        }
+
+        $resolvedPlace = [string]$Place
+        if ([string]::IsNullOrWhiteSpace($resolvedPlace)) {
+            $resolvedPlace = "unknown"
+        }
+
+        $resolvedAppRoot = Get-AppRoot
+        $listPath = Join-Path -Path $resolvedAppRoot -ChildPath "list.json"
+        $logPath = Get-LogPath
+
+        try {
+            $soldierIndex = Load-SoldierList -Path $listPath
+        }
+        catch {
+            [Console]::Error.WriteLine($_.Exception.Message)
+            return
+        }
+
+        $recentSerials = @{}
+
+        [Console]::WriteLine(("acs started. place={0}" -f $resolvedPlace))
+        [Console]::WriteLine(("list={0}" -f $listPath))
+        [Console]::WriteLine(("log={0}" -f $logPath))
+        [Console]::WriteLine("scan barcode. type exit to quit.")
+
+        while ($true) {
+            $line = Read-Host
+            if ($null -eq $line) {
+                continue
+            }
+
+            $inputValue = $line.Trim()
+            if ($inputValue.Length -eq 0) {
+                continue
+            }
+
+            if ($inputValue.ToLowerInvariant() -eq "exit") {
+                break
+            }
+
+            Process-Barcode `
+                -Barcode $inputValue `
+                -Place $resolvedPlace `
+                -SoldierIndex $soldierIndex `
+                -RecentSerials $recentSerials `
+                -LogPath $logPath
+        }
     }
-    catch {
-        [Console]::Error.WriteLine($_.Exception.Message)
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+}
+
+function Main {
+    [CmdletBinding()]
+    param(
+        [string]$Place = "unknown",
+        [string]$AppRoot
+    )
+
+    Start-ACS -Place $Place -AppRoot $AppRoot
+}
+
+function Invoke-AcsScriptEntryPoint {
+    if ([string]::IsNullOrWhiteSpace($script:InitialCommandPath)) {
         return
     }
 
-    $recentSerials = @{}
-
-    [Console]::WriteLine(("acs started. place={0}" -f $resolvedPlace))
-    [Console]::WriteLine(("list={0}" -f $listPath))
-    [Console]::WriteLine(("log={0}" -f $logPath))
-    [Console]::WriteLine("scan barcode. type exit to quit.")
-
-    while ($true) {
-        $line = Read-Host
-        if ($null -eq $line) {
-            continue
-        }
-
-        $inputValue = $line.Trim()
-        if ($inputValue.Length -eq 0) {
-            continue
-        }
-
-        if ($inputValue.ToLowerInvariant() -eq "exit") {
-            break
-        }
-
-        Process-Barcode `
-            -Barcode $inputValue `
-            -Place $resolvedPlace `
-            -SoldierIndex $soldierIndex `
-            -RecentSerials $recentSerials `
-            -LogPath $logPath
+    if ($script:InitialInvocationName -eq '.') {
+        return
     }
+
+    $place = "unknown"
+    if ($script:InitialArguments.Count -gt 0) {
+        $candidatePlace = [string]$script:InitialArguments[0]
+        if (-not [string]::IsNullOrWhiteSpace($candidatePlace)) {
+            $place = $candidatePlace
+        }
+    }
+
+    $appRoot = $null
+    if ($script:InitialArguments.Count -gt 1) {
+        $candidateAppRoot = [string]$script:InitialArguments[1]
+        if (-not [string]::IsNullOrWhiteSpace($candidateAppRoot)) {
+            $appRoot = $candidateAppRoot
+        }
+    }
+
+    Start-ACS -Place $place -AppRoot $appRoot
 }
 
-if ($MyInvocation.InvocationName -ne '.') {
-    Main -Place $Place
-}
+Invoke-AcsScriptEntryPoint

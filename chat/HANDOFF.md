@@ -1,60 +1,23 @@
-# Handoff
+# Chat Handoff
 
-## 2026-03-06
+## 2026-03-07
 
-- Implemented chat backend in `server.ps1`:
-  - Added `HttpListener` server on configurable host/port (default `localhost:9999`).
-  - Implemented long polling API endpoints:
-    - `POST /join`
-    - `POST /send`
-    - `GET /poll`
-    - `POST /leave`
-    - `GET /health`
-  - Added JSON error contract with status codes `400/401/404/405/500`.
-  - Added CORS headers and `OPTIONS` handling (`204`).
-  - Added concurrent request processing using worker runspaces + blocking request queue.
-  - Added per-client pending message queues and wake signals for long-poll completion.
-  - Added idle client cleanup (default 5 minutes) with resource disposal.
+- `chat/SPEC.md` 를 기존 `SSE + client.ps1` 구조에서 `PowerShell WebSocket 서버 + file:// index.html 클라이언트` 구조로 전면 개정했다.
+- 서버는 메시지 저장 없이 즉시 브로드캐스트만 수행한다는 점을 명시했다.
+- 서버와 클라이언트가 같은 내부망에 있으며, `ip:port` 로 직접 접근한다는 전제를 문서에 고정했다.
+- 클라이언트는 별도 HTTP 서버 없이 브라우저에서 `file://` 로 직접 여는 방식으로 정의했다.
+- 서버 validation 을 최소화하고 올바른 입력을 가정하는 방향으로 스펙을 단순화했다.
+- 기존 `GET /stream`, `POST /send`, `GET /health`, SSE, `tiktok-*` 관련 내용은 제거했다.
+- `chat/server.ps1` 를 새로 작성했다.
+- 구현은 `Add-Type` 없이 순수 PowerShell 스크립트와 .NET 타입 호출만 사용한다.
+- 서버는 `HttpListener` 로 WebSocket 업그레이드를 받고, 클라이언트별 수신 루프는 runspace pool에서 처리한다.
+- 수신 JSON은 PowerShell의 `ConvertFrom-Json` / `ConvertTo-Json` 으로 `sentAt` 만 덧붙여 현재 연결된 모든 세션에 즉시 브로드캐스트한다.
+- `server.ps1` 구조를 top-level 함수 정의들 + `Main` 엔트리 형태로 재정리했다.
+- runspace worker도 중첩 함수 대신 top-level 함수 소스를 조합해 실행하도록 바꿨다.
 
-- Implemented console client in `client.ps1`:
-  - Prompts for name at startup and validates 1~20 length.
-  - Calls `/join`, then starts background poll loop (`/poll`) for incoming messages.
-  - Sends typed lines via `/send`.
-  - Supports `/exit` command to call `/leave` and stop cleanly.
-  - Displays messages as `[HH:mm:ss] senderName: text`.
+## Next Session Notes
 
-- Added `SPEC.md` for `/chat`:
-  - Captures architecture, API schema, constraints, validation, error model, and test scenarios.
-  - Documents run commands for server/client.
-
-- Notes:
-  - Message delivery policy is "new messages only" (no full history replay).
-  - Name duplication is allowed; server identity is `clientId`.
-
-## 2026-03-06 (simplification pass)
-
-- Refactored for lightweight internal-LAN usage:
-  - Replaced complex per-client queue/signal architecture with a simple global recent-message buffer (`MaxMessages`, default 200).
-  - Polling now uses cursor (`id > cursor`) scan + short sleep loop until timeout.
-  - Kept same core endpoints (`/join`, `/send`, `/poll`, `/leave`, `/health`) to avoid client/server contract breakage.
-  - Reduced server complexity while retaining concurrent handling through a runspace pool.
-
-- Updated client to match simplified behavior:
-  - Maintains only one cursor value.
-  - Background poll loop prints incoming messages and advances cursor.
-  - Main loop sends plain text and exits via `/exit`.
-
-- Updated `SPEC.md`:
-  - Rewritten as "Simple LAN Chat" spec focused on non-critical network-check usage.
-  - Added explicit LAN run examples using server host IP.
-
-- Added simple tick/tock utility scripts in `/chat`:
-  - `tiktok-server.ps1`: lightweight HTTP server (`POST /tiktok`) returning `tock` when request body is `tick`.
-  - `tiktok-clinet.ps1`: tiny client that posts `tick` and prints server response.
-  - Purpose: quick internal network connectivity verification, independent from main chat flow.
-
-- Added SSE smoke-test utilities in `/chat`:
-  - `tiktok-stream-server.ps1`: minimal SSE server with `GET /stream`, `POST /tick`, and `GET /health`.
-  - Server keeps only active stream connections in memory and broadcasts `event: tock` / `data: tock` frames on each valid tick.
-  - `tiktok-stream-client.ps1`: connects to `/stream`, optionally sends one tick via `-SendTick`, and prints the first event received.
-  - Intended to validate the HTTP-only streaming approach before refactoring main chat to SSE.
+- 현재 `server.ps1` 는 존재한다.
+- `BindAddress` 는 `SERVER_IP` placeholder 이므로 실제 내부망 IP로 먼저 수정해야 한다.
+- 다음 작업은 `SPEC.md` 기준으로 `index.html`, 필요 시 `app.js`, `style.css` 를 실제 구현하는 것이다.
+- 구현 시 핵심은 "최소 기능의 WebSocket 연결 테스트용 채팅"이며, 불필요한 validation 과 기능 확장은 넣지 않는 것이다.

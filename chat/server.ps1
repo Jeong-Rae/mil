@@ -1,565 +1,339 @@
-[CmdletBinding()]
-param(
-    [int]$Port = 9999,
-    [string]$BindAddress = "localhost",
-    [int]$DefaultPollTimeoutSec = 20,
-    [int]$MaxPollTimeoutSec = 30,
-    [int]$MaxMessages = 200,
-    [int]$IdleCleanupMinutes = 10,
-    [int]$MaxWorkers = 16
-)
-
-Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Get-IsoNow {
-    [DateTime]::UtcNow.ToString("o")
+# Edit these constants directly before running on your LAN.
+$Port = 9999
+$BindAddress = "SERVER_IP"
+$ListenerPrefix = "http://${BindAddress}:$Port/"
+$RunspaceMax = 16
+
+function Write-PlainTextResponse {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Net.HttpListenerResponse]$Response,
+        [Parameter(Mandatory = $true)]
+        [string]$Body
+    )
+
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Body)
+    $Response.StatusCode = 200
+    $Response.ContentType = "text/plain; charset=utf-8"
+    $Response.ContentLength64 = $bytes.Length
+    $Response.OutputStream.Write($bytes, 0, $bytes.Length)
+    $Response.OutputStream.Close()
 }
 
-function Cleanup-CompletedRequests {
-    param([System.Collections.ArrayList]$ActiveRequests)
+function Remove-CompletedWorkers {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Collections.ArrayList]$Workers
+    )
 
-    for ($i = $ActiveRequests.Count - 1; $i -ge 0; $i--) {
-        $entry = $ActiveRequests[$i]
-        if (-not $entry.Handle.IsCompleted) {
+    $completed = @()
+
+    foreach ($worker in $Workers) {
+        if (-not $worker.AsyncResult.IsCompleted) {
             continue
         }
 
         try {
-            $entry.PowerShell.EndInvoke($entry.Handle)
+            $worker.PowerShell.EndInvoke($worker.AsyncResult) | Out-Null
         }
         catch {
+            Write-Warning "Client worker ended with an error: $($_.Exception.Message)"
         }
         finally {
-            $entry.PowerShell.Dispose()
-            $ActiveRequests.RemoveAt($i)
+            $worker.PowerShell.Dispose()
+            $completed += $worker
         }
+    }
+
+    foreach ($worker in $completed) {
+        [void]$Workers.Remove($worker)
     }
 }
 
-function Cleanup-IdleClients {
+function Stop-ClientSocket {
     param(
-        [hashtable]$State,
-        [int]$IdleMinutes
+        [Parameter(Mandatory = $true)]
+        $Client
     )
 
-    $threshold = [DateTime]::UtcNow.AddMinutes(-1 * $IdleMinutes)
-
-    [System.Threading.Monitor]::Enter($State.Lock)
-    try {
-        foreach ($clientId in @($State.Clients.Keys)) {
-            $client = $State.Clients[$clientId]
-            if ($null -eq $client) {
-                continue
-            }
-
-            if ([DateTime]$client.lastSeenAt -lt $threshold) {
-                $State.Clients.Remove($clientId) | Out-Null
-            }
-        }
-    }
-    finally {
-        [System.Threading.Monitor]::Exit($State.Lock)
-    }
-}
-
-$state = [hashtable]::Synchronized(@{
-    Lock    = New-Object object
-    Clients = [hashtable]::Synchronized(@{})
-    Messages = New-Object System.Collections.ArrayList
-    NextId  = [int64]0
-    Running = $true
-})
-
-$settings = [hashtable]::Synchronized(@{
-    DefaultPollTimeoutSec = $DefaultPollTimeoutSec
-    MaxPollTimeoutSec     = $MaxPollTimeoutSec
-    MaxMessages           = $MaxMessages
-})
-
-$handlerScript = {
-    param(
-        [System.Net.HttpListenerContext]$Context,
-        [hashtable]$State,
-        [hashtable]$Settings
-    )
-
-    Set-StrictMode -Version Latest
-    $ErrorActionPreference = "Stop"
-
-    function Get-IsoNow {
-        [DateTime]::UtcNow.ToString("o")
-    }
-
-    function Add-Cors {
-        param([System.Net.HttpListenerResponse]$Response)
-
-        $Response.Headers["Access-Control-Allow-Origin"] = "*"
-        $Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-        $Response.Headers["Access-Control-Allow-Headers"] = "Content-Type"
-    }
-
-    function Close-Response {
-        param([System.Net.HttpListenerResponse]$Response)
-
-        try {
-            $Response.OutputStream.Close()
-        }
-        catch {
-        }
-
-        try {
-            $Response.Close()
-        }
-        catch {
-        }
-    }
-
-    function Send-Json {
-        param(
-            [System.Net.HttpListenerContext]$Ctx,
-            [int]$StatusCode,
-            [object]$Body
-        )
-
-        $response = $Ctx.Response
-        $response.StatusCode = $StatusCode
-        $response.ContentType = "application/json; charset=utf-8"
-        $response.ContentEncoding = [System.Text.Encoding]::UTF8
-        Add-Cors -Response $response
-
-        if ($null -eq $Body) {
-            $response.ContentLength64 = 0
-            Close-Response -Response $response
-            return
-        }
-
-        $json = ConvertTo-Json -InputObject $Body -Depth 6 -Compress
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
-        $response.ContentLength64 = $bytes.Length
-        $response.OutputStream.Write($bytes, 0, $bytes.Length)
-        Close-Response -Response $response
-    }
-
-    function Send-Error {
-        param(
-            [System.Net.HttpListenerContext]$Ctx,
-            [int]$StatusCode,
-            [string]$Code,
-            [string]$Message
-        )
-
-        Send-Json -Ctx $Ctx -StatusCode $StatusCode -Body ([ordered]@{
-                error      = [ordered]@{
-                    code    = $Code
-                    message = $Message
-                }
-                serverTime = Get-IsoNow
-            })
-    }
-
-    function Read-JsonBody {
-        param([System.Net.HttpListenerRequest]$Request)
-
-        if (-not $Request.HasEntityBody) {
-            return $null
-        }
-
-        $reader = New-Object System.IO.StreamReader($Request.InputStream, $Request.ContentEncoding)
-        try {
-            $raw = $reader.ReadToEnd()
-        }
-        finally {
-            $reader.Close()
-        }
-
-        if ([string]::IsNullOrWhiteSpace($raw)) {
-            return $null
-        }
-
-        try {
-            ConvertFrom-Json -InputObject $raw
-        }
-        catch {
-            throw "invalid JSON body"
-        }
-    }
-
-    function Get-Value {
-        param(
-            [object]$InputObject,
-            [string]$Name
-        )
-
-        if ($null -eq $InputObject) {
-            return $null
-        }
-
-        $prop = $InputObject.PSObject.Properties[$Name]
-        if ($null -eq $prop) {
-            return $null
-        }
-
-        $prop.Value
-    }
-
-    function Parse-Int64 {
-        param(
-            [string]$Value,
-            [int64]$DefaultValue
-        )
-
-        if ([string]::IsNullOrWhiteSpace($Value)) {
-            return $DefaultValue
-        }
-
-        $parsed = [int64]0
-        if ([int64]::TryParse($Value, [ref]$parsed)) {
-            return $parsed
-        }
-
-        $DefaultValue
-    }
-
-    function Parse-Int {
-        param(
-            [string]$Value,
-            [int]$DefaultValue
-        )
-
-        if ([string]::IsNullOrWhiteSpace($Value)) {
-            return $DefaultValue
-        }
-
-        $parsed = 0
-        if ([int]::TryParse($Value, [ref]$parsed)) {
-            return $parsed
-        }
-
-        $DefaultValue
+    if ($null -eq $Client -or $null -eq $Client.Socket) {
+        return
     }
 
     try {
-        $request = $Context.Request
-        $path = $request.Url.AbsolutePath.ToLowerInvariant()
-        $method = $request.HttpMethod.ToUpperInvariant()
-
-        if ($method -eq "OPTIONS") {
-            Send-Json -Ctx $Context -StatusCode 204 -Body $null
-            return
-        }
-
-        switch ($path) {
-            "/join" {
-                if ($method -ne "POST") {
-                    Send-Error -Ctx $Context -StatusCode 405 -Code "method_not_allowed" -Message "Use POST."
-                    return
-                }
-
-                $payload = Read-JsonBody -Request $request
-                $name = [string](Get-Value -InputObject $payload -Name "name")
-                $name = $name.Trim()
-
-                if ($name.Length -lt 1 -or $name.Length -gt 20) {
-                    Send-Error -Ctx $Context -StatusCode 400 -Code "invalid_name" -Message "name must be 1 to 20 characters."
-                    return
-                }
-
-                $clientId = [guid]::NewGuid().ToString()
-                $joinedAt = Get-IsoNow
-
-                [System.Threading.Monitor]::Enter($State.Lock)
-                try {
-                    $State.Clients[$clientId] = [ordered]@{
-                        name       = $name
-                        joinedAt   = $joinedAt
-                        lastSeenAt = [DateTime]::UtcNow
-                    }
-                }
-                finally {
-                    [System.Threading.Monitor]::Exit($State.Lock)
-                }
-
-                Send-Json -Ctx $Context -StatusCode 200 -Body ([ordered]@{
-                        clientId = $clientId
-                        name     = $name
-                        joinedAt = $joinedAt
-                    })
-                return
-            }
-
-            "/send" {
-                if ($method -ne "POST") {
-                    Send-Error -Ctx $Context -StatusCode 405 -Code "method_not_allowed" -Message "Use POST."
-                    return
-                }
-
-                $payload = Read-JsonBody -Request $request
-                $clientId = [string](Get-Value -InputObject $payload -Name "clientId")
-                $text = [string](Get-Value -InputObject $payload -Name "text")
-
-                if ([string]::IsNullOrWhiteSpace($clientId)) {
-                    Send-Error -Ctx $Context -StatusCode 400 -Code "invalid_client_id" -Message "clientId is required."
-                    return
-                }
-
-                if ([string]::IsNullOrWhiteSpace($text) -or $text.Length -gt 500) {
-                    Send-Error -Ctx $Context -StatusCode 400 -Code "invalid_text" -Message "text must be 1 to 500 characters."
-                    return
-                }
-
-                $messageId = [int64]0
-                [System.Threading.Monitor]::Enter($State.Lock)
-                try {
-                    if (-not $State.Clients.ContainsKey($clientId)) {
-                        Send-Error -Ctx $Context -StatusCode 401 -Code "unauthorized_client" -Message "clientId is not active."
-                        return
-                    }
-
-                    $senderName = [string]$State.Clients[$clientId].name
-                    $State.Clients[$clientId].lastSeenAt = [DateTime]::UtcNow
-
-                    $State.NextId = [int64]$State.NextId + 1
-                    $messageId = [int64]$State.NextId
-
-                    $message = [ordered]@{
-                        id         = $messageId
-                        senderName = $senderName
-                        text       = $text
-                        sentAt     = Get-IsoNow
-                    }
-
-                    [void]$State.Messages.Add($message)
-                    while ($State.Messages.Count -gt $Settings.MaxMessages) {
-                        $State.Messages.RemoveAt(0)
-                    }
-                }
-                finally {
-                    [System.Threading.Monitor]::Exit($State.Lock)
-                }
-
-                Send-Json -Ctx $Context -StatusCode 202 -Body ([ordered]@{
-                        accepted   = $true
-                        messageId  = $messageId
-                        serverTime = Get-IsoNow
-                    })
-                return
-            }
-
-            "/poll" {
-                if ($method -ne "GET") {
-                    Send-Error -Ctx $Context -StatusCode 405 -Code "method_not_allowed" -Message "Use GET."
-                    return
-                }
-
-                $clientId = [string]$request.QueryString["clientId"]
-                if ([string]::IsNullOrWhiteSpace($clientId)) {
-                    Send-Error -Ctx $Context -StatusCode 400 -Code "invalid_client_id" -Message "clientId is required."
-                    return
-                }
-
-                $cursor = Parse-Int64 -Value ([string]$request.QueryString["cursor"]) -DefaultValue ([int64]0)
-                $timeoutSec = Parse-Int -Value ([string]$request.QueryString["timeoutSec"]) -DefaultValue $Settings.DefaultPollTimeoutSec
-                if ($timeoutSec -lt 1) {
-                    $timeoutSec = 1
-                }
-                if ($timeoutSec -gt $Settings.MaxPollTimeoutSec) {
-                    $timeoutSec = $Settings.MaxPollTimeoutSec
-                }
-
-                $startedAt = [DateTime]::UtcNow
-                $result = @()
-
-                while ($true) {
-                    [System.Threading.Monitor]::Enter($State.Lock)
-                    try {
-                        if (-not $State.Clients.ContainsKey($clientId)) {
-                            Send-Error -Ctx $Context -StatusCode 401 -Code "unauthorized_client" -Message "clientId is not active."
-                            return
-                        }
-
-                        $State.Clients[$clientId].lastSeenAt = [DateTime]::UtcNow
-
-                        $result = @()
-                        foreach ($item in $State.Messages) {
-                            if ([int64]$item.id -gt $cursor) {
-                                $result += $item
-                            }
-                        }
-                    }
-                    finally {
-                        [System.Threading.Monitor]::Exit($State.Lock)
-                    }
-
-                    if ($result.Count -gt 0) {
-                        break
-                    }
-
-                    if (([DateTime]::UtcNow - $startedAt).TotalSeconds -ge $timeoutSec) {
-                        break
-                    }
-
-                    Start-Sleep -Milliseconds 300
-                }
-
-                $nextCursor = $cursor
-                foreach ($item in $result) {
-                    $itemId = [int64]$item.id
-                    if ($itemId -gt $nextCursor) {
-                        $nextCursor = $itemId
-                    }
-                }
-
-                Send-Json -Ctx $Context -StatusCode 200 -Body ([ordered]@{
-                        messages   = $result
-                        nextCursor = $nextCursor
-                        serverTime = Get-IsoNow
-                    })
-                return
-            }
-
-            "/leave" {
-                if ($method -ne "POST") {
-                    Send-Error -Ctx $Context -StatusCode 405 -Code "method_not_allowed" -Message "Use POST."
-                    return
-                }
-
-                $payload = Read-JsonBody -Request $request
-                $clientId = [string](Get-Value -InputObject $payload -Name "clientId")
-                if ([string]::IsNullOrWhiteSpace($clientId)) {
-                    Send-Error -Ctx $Context -StatusCode 400 -Code "invalid_client_id" -Message "clientId is required."
-                    return
-                }
-
-                $removed = $false
-                [System.Threading.Monitor]::Enter($State.Lock)
-                try {
-                    if ($State.Clients.ContainsKey($clientId)) {
-                        $State.Clients.Remove($clientId) | Out-Null
-                        $removed = $true
-                    }
-                }
-                finally {
-                    [System.Threading.Monitor]::Exit($State.Lock)
-                }
-
-                Send-Json -Ctx $Context -StatusCode 200 -Body ([ordered]@{
-                        left = $removed
-                    })
-                return
-            }
-
-            "/health" {
-                if ($method -ne "GET") {
-                    Send-Error -Ctx $Context -StatusCode 405 -Code "method_not_allowed" -Message "Use GET."
-                    return
-                }
-
-                Send-Json -Ctx $Context -StatusCode 200 -Body ([ordered]@{
-                        status     = "ok"
-                        serverTime = Get-IsoNow
-                    })
-                return
-            }
-
-            default {
-                Send-Error -Ctx $Context -StatusCode 404 -Code "not_found" -Message "endpoint not found."
-                return
-            }
+        if ($Client.Socket.State -eq [System.Net.WebSockets.WebSocketState]::Open -or
+            $Client.Socket.State -eq [System.Net.WebSockets.WebSocketState]::CloseReceived) {
+            $closeTask = $Client.Socket.CloseAsync(
+                [System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,
+                "bye",
+                [System.Threading.CancellationToken]::None
+            )
+            $closeTask.GetAwaiter().GetResult()
         }
     }
     catch {
         try {
-            Send-Error -Ctx $Context -StatusCode 500 -Code "internal_error" -Message $_.Exception.Message
+            $Client.Socket.Abort()
         }
         catch {
         }
     }
+    finally {
+        $Client.Socket.Dispose()
+    }
 }
 
-$listener = $null
-$pool = $null
-$activeRequests = New-Object System.Collections.ArrayList
+function Remove-SharedClient {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Id,
+        [Parameter(Mandatory = $true)]
+        [hashtable]$State
+    )
 
-try {
-    $listener = New-Object System.Net.HttpListener
-    $listener.Prefixes.Add(("http://{0}:{1}/" -f $BindAddress, $Port))
-    $listener.Start()
+    $client = $null
 
-    $pool = [runspacefactory]::CreateRunspacePool(1, $MaxWorkers)
+    if ($State.Clients.ContainsKey($Id)) {
+        $client = $State.Clients[$Id]
+        $State.Clients.Remove($Id)
+    }
+
+    if ($null -eq $client) {
+        return
+    }
+
+    Stop-ClientSocket -Client $client
+}
+
+function Read-WebSocketText {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Net.WebSockets.WebSocket]$Socket
+    )
+
+    $buffer = New-Object byte[] 4096
+    $segment = [System.ArraySegment[byte]]::new($buffer)
+    $stream = [System.IO.MemoryStream]::new()
+
+    try {
+        while ($true) {
+            $result = $Socket.ReceiveAsync(
+                $segment,
+                [System.Threading.CancellationToken]::None
+            ).GetAwaiter().GetResult()
+
+            if ($result.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
+                return $null
+            }
+
+            if ($result.MessageType -ne [System.Net.WebSockets.WebSocketMessageType]::Text) {
+                continue
+            }
+
+            $stream.Write($buffer, 0, $result.Count)
+
+            if ($result.EndOfMessage) {
+                break
+            }
+        }
+
+        return [System.Text.Encoding]::UTF8.GetString($stream.ToArray())
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
+function Broadcast-Json {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$InboundJson,
+        [Parameter(Mandatory = $true)]
+        [hashtable]$State
+    )
+
+    $message = $InboundJson | ConvertFrom-Json
+    $message | Add-Member -NotePropertyName sentAt -NotePropertyValue ([DateTime]::UtcNow.ToString("o")) -Force
+    $outboundJson = $message | ConvertTo-Json -Compress
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($outboundJson)
+    $segment = [System.ArraySegment[byte]]::new($bytes)
+
+    foreach ($entry in @($State.Clients.GetEnumerator())) {
+        $target = $entry.Value
+        $lockTaken = $false
+
+        try {
+            [System.Threading.Monitor]::Enter($target.SendLock, [ref]$lockTaken)
+
+            if ($target.Socket.State -ne [System.Net.WebSockets.WebSocketState]::Open) {
+                throw "socket is not open"
+            }
+
+            $target.Socket.SendAsync(
+                $segment,
+                [System.Net.WebSockets.WebSocketMessageType]::Text,
+                $true,
+                [System.Threading.CancellationToken]::None
+            ).GetAwaiter().GetResult()
+        }
+        catch {
+            Remove-SharedClient -Id $entry.Key -State $State
+        }
+        finally {
+            if ($lockTaken) {
+                [System.Threading.Monitor]::Exit($target.SendLock)
+            }
+        }
+    }
+}
+
+function Start-ClientReceiveLoop {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ClientId,
+        [Parameter(Mandatory = $true)]
+        [System.Net.WebSockets.WebSocket]$Socket,
+        [Parameter(Mandatory = $true)]
+        [hashtable]$SharedState
+    )
+
+    try {
+        while ($Socket.State -eq [System.Net.WebSockets.WebSocketState]::Open -or
+               $Socket.State -eq [System.Net.WebSockets.WebSocketState]::CloseReceived) {
+            $text = Read-WebSocketText -Socket $Socket
+
+            if ($null -eq $text) {
+                break
+            }
+
+            Broadcast-Json -InboundJson $text -State $SharedState
+        }
+    }
+    finally {
+        Remove-SharedClient -Id $ClientId -State $SharedState
+    }
+}
+
+function Get-WorkerScript {
+    $functionNames = @(
+        "Stop-ClientSocket",
+        "Remove-SharedClient",
+        "Read-WebSocketText",
+        "Broadcast-Json",
+        "Start-ClientReceiveLoop"
+    )
+
+    $definitions = foreach ($name in $functionNames) {
+        ${function:$name}.ToString()
+    }
+
+    return (($definitions -join "`n`n") + "`n`nStart-ClientReceiveLoop -ClientId `$args[0] -Socket `$args[1] -SharedState `$args[2]")
+}
+
+function Start-ChatServer {
+    $listener = [System.Net.HttpListener]::new()
+    $listener.Prefixes.Add($ListenerPrefix)
+
+    $state = [hashtable]::Synchronized(@{
+        Clients = [hashtable]::Synchronized(@{})
+    })
+
+    $pool = [runspacefactory]::CreateRunspacePool(1, $RunspaceMax)
+    $pool.ApartmentState = "MTA"
     $pool.Open()
 
-    [Console]::WriteLine(("chat server listening on http://{0}:{1}" -f $BindAddress, $Port))
-    [Console]::WriteLine("for LAN, use your host IP as -BindAddress and connect clients to that IP")
+    $workers = [System.Collections.ArrayList]::new()
+    $workerScript = Get-WorkerScript
 
-    $nextCleanupAt = [DateTime]::UtcNow.AddSeconds(30)
-    while ($listener.IsListening) {
-        $pending = $listener.BeginGetContext($null, $null)
+    Write-Host "Simple LAN Chat server starting..."
+    Write-Host "Listener prefix: $ListenerPrefix"
+    Write-Host "Connect from clients with: ws://${BindAddress}:$Port/"
+    Write-Host "Press Ctrl+C to stop."
 
-        while (-not $pending.AsyncWaitHandle.WaitOne(1000)) {
-            if ([DateTime]::UtcNow -ge $nextCleanupAt) {
-                Cleanup-IdleClients -State $state -IdleMinutes $IdleCleanupMinutes
-                Cleanup-CompletedRequests -ActiveRequests $activeRequests
-                $nextCleanupAt = [DateTime]::UtcNow.AddSeconds(30)
+    try {
+        $listener.Start()
+
+        while ($listener.IsListening) {
+            Remove-CompletedWorkers -Workers $workers
+
+            try {
+                $context = $listener.GetContext()
+            }
+            catch [System.Net.HttpListenerException] {
+                break
+            }
+            catch [System.ObjectDisposedException] {
+                break
+            }
+
+            if (-not $context.Request.IsWebSocketRequest) {
+                Write-PlainTextResponse -Response $context.Response -Body "Simple LAN Chat WebSocket server."
+                continue
+            }
+
+            try {
+                $webSocketContext = $context.AcceptWebSocketAsync($null).GetAwaiter().GetResult()
+            }
+            catch {
+                $context.Response.StatusCode = 500
+                $context.Response.Close()
+                continue
+            }
+
+            $clientId = [guid]::NewGuid().ToString("N")
+            $socket = $webSocketContext.WebSocket
+            $state.Clients[$clientId] = @{
+                Socket = $socket
+                SendLock = New-Object object
+            }
+
+            $workerPowerShell = [powershell]::Create()
+            $workerPowerShell.RunspacePool = $pool
+            [void]$workerPowerShell.AddScript($workerScript).AddArgument($clientId).AddArgument($socket).AddArgument($state)
+
+            $worker = [pscustomobject]@{
+                ClientId = $clientId
+                PowerShell = $workerPowerShell
+                AsyncResult = $workerPowerShell.BeginInvoke()
+            }
+
+            [void]$workers.Add($worker)
+            Write-Host "Client connected: $clientId"
+        }
+    }
+    finally {
+        foreach ($clientEntry in @($state.Clients.GetEnumerator())) {
+            Stop-ClientSocket -Client $clientEntry.Value
+        }
+
+        $state.Clients.Clear()
+        Remove-CompletedWorkers -Workers $workers
+
+        foreach ($worker in @($workers)) {
+            try {
+                $worker.PowerShell.Stop()
+            }
+            catch {
+            }
+            finally {
+                $worker.PowerShell.Dispose()
             }
         }
 
-        $context = $listener.EndGetContext($pending)
-        Cleanup-CompletedRequests -ActiveRequests $activeRequests
+        if ($listener.IsListening) {
+            $listener.Stop()
+        }
 
-        $ps = [powershell]::Create()
-        $ps.RunspacePool = $pool
-        $null = $ps.AddScript($handlerScript).AddArgument($context).AddArgument($state).AddArgument($settings)
-        $handle = $ps.BeginInvoke()
-        [void]$activeRequests.Add([pscustomobject]@{
-                PowerShell = $ps
-                Handle     = $handle
-            })
+        $listener.Close()
+        $pool.Close()
+        $pool.Dispose()
     }
 }
-catch {
-    [Console]::Error.WriteLine(("server error: {0}" -f $_.Exception.Message))
-    throw
+
+function Main {
+    Start-ChatServer
 }
-finally {
-    $state.Running = $false
 
-    if ($null -ne $listener) {
-        try {
-            if ($listener.IsListening) {
-                $listener.Stop()
-            }
-        }
-        catch {
-        }
-
-        try {
-            $listener.Close()
-        }
-        catch {
-        }
-    }
-
-    Cleanup-CompletedRequests -ActiveRequests $activeRequests
-    foreach ($entry in @($activeRequests)) {
-        try {
-            $entry.PowerShell.EndInvoke($entry.Handle)
-        }
-        catch {
-        }
-        finally {
-            $entry.PowerShell.Dispose()
-        }
-    }
-
-    if ($null -ne $pool) {
-        try {
-            $pool.Close()
-        }
-        catch {
-        }
-        finally {
-            $pool.Dispose()
-        }
-    }
-}
+Main

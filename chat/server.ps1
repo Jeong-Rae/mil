@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 # Edit these constants directly before running on your LAN.
 $Port = 9999
-$BindAddress = "SERVER_IP"
+$BindAddress = "localhost"
 $ListenerPrefix = "http://${BindAddress}:$Port/"
 $RunspaceMax = 16
 
@@ -24,9 +24,12 @@ function Write-PlainTextResponse {
 
 function Remove-CompletedWorkers {
     param(
-        [Parameter(Mandatory = $true)]
         [System.Collections.ArrayList]$Workers
     )
+
+    if ($null -eq $Workers -or $Workers.Count -eq 0) {
+        return
+    }
 
     $completed = @()
 
@@ -226,7 +229,8 @@ function Get-WorkerScript {
     )
 
     $definitions = foreach ($name in $functionNames) {
-        ${function:$name}.ToString()
+        $functionInfo = Get-Item -Path "Function:$name" -ErrorAction Stop
+        $functionInfo.ScriptBlock.ToString()
     }
 
     return (($definitions -join "`n`n") + "`n`nStart-ClientReceiveLoop -ClientId `$args[0] -Socket `$args[1] -SharedState `$args[2]")
@@ -333,6 +337,10 @@ function Start-ChatServer {
 }
 
 function Main {
+    if ($BindAddress -eq "SERVER_IP") {
+        throw "Set `$BindAddress in server.ps1 to the actual LAN IP before running."
+    }
+
     Start-ChatServer
 }
 

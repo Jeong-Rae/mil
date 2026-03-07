@@ -14,6 +14,9 @@
 - 수신 JSON은 PowerShell의 `ConvertFrom-Json` / `ConvertTo-Json` 으로 `sentAt` 만 덧붙여 현재 연결된 모든 세션에 즉시 브로드캐스트한다.
 - `server.ps1` 구조를 top-level 함수 정의들 + `Main` 엔트리 형태로 재정리했다.
 - runspace worker도 중첩 함수 대신 top-level 함수 소스를 조합해 실행하도록 바꿨다.
+- `server.ps1` 의 `Get-WorkerScript` 는 `${function:name}` 방식 대신 `Get-Item Function:<name>` 으로 함수 정의를 읽도록 수정했다. 기존 방식은 null 을 반환해 실행 시 실패했다.
+- `Remove-CompletedWorkers` 는 빈 worker 목록도 허용하도록 수정했다. 기존 선언은 시작 직후 빈 컬렉션에서 바인딩 오류를 냈다.
+- `BindAddress` 가 `SERVER_IP` placeholder 인 상태로 실행되면 시작 전에 명확한 오류 메시지를 내도록 수정했다.
 - `chat/index.html`, `chat/app.js`, `chat/style.css` 를 추가했다.
 - `chat/client.ps1` 를 추가했다.
 - HTML은 연결 폼, 메시지 전송 폼, 채팅 목록 화면으로 구성했다.

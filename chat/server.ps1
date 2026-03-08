@@ -4,6 +4,7 @@ $ErrorActionPreference = "Stop"
 $ListenerPrefix = "http://+:9999/api/"
 $StaticPrefix = "http://+:9999/"
 $ClientConnectUrl = "ws://{server-ip}:9999/api/"
+$StaticRoot = (Get-Location).Path
 $RunspaceMax = 16
 
 . "./server/static.ps1"

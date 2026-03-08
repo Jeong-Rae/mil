@@ -31,6 +31,26 @@ function Remove-CompletedWorkers {
     }
 }
 
+function Get-ClientName {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Net.HttpListenerRequest]$Request
+    )
+
+    if ($null -eq $Request.RemoteEndPoint) {
+        return "unknown"
+    }
+
+    $address = $Request.RemoteEndPoint.Address.ToString()
+    $parts = $address.Split(".")
+
+    if ($parts.Count -ge 4) {
+        return "$($parts[2]).$($parts[3])"
+    }
+
+    return $address
+}
+
 function Get-WorkerScript {
     $functionNames = @(
         "Stop-ClientSocket",
@@ -107,8 +127,10 @@ function Start-ChatServer {
             }
 
             $clientId = [guid]::NewGuid().ToString("N")
+            $clientName = Get-ClientName -Request $context.Request
             $socket = $webSocketContext.WebSocket
             $state.Clients[$clientId] = @{
+                Name = $clientName
                 Socket = $socket
                 SendLock = New-Object object
             }
@@ -124,7 +146,7 @@ function Start-ChatServer {
             }
 
             [void]$workers.Add($worker)
-            Write-Host "Client connected: $clientId"
+            Write-Host "Client connected: $clientName ($clientId)"
         }
     }
     finally {

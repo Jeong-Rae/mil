@@ -95,12 +95,19 @@ function Read-WebSocketText {
 function Broadcast-Json {
     param(
         [Parameter(Mandatory = $true)]
+        [string]$ClientId,
+        [Parameter(Mandatory = $true)]
         [string]$InboundJson,
         [Parameter(Mandatory = $true)]
         [hashtable]$State
     )
 
+    if (-not $State.Clients.ContainsKey($ClientId)) {
+        return
+    }
+
     $message = $InboundJson | ConvertFrom-Json
+    $message | Add-Member -NotePropertyName name -NotePropertyValue $State.Clients[$ClientId].Name -Force
     $message | Add-Member -NotePropertyName sentAt -NotePropertyValue ([DateTime]::UtcNow.ToString("o")) -Force
     $outboundJson = $message | ConvertTo-Json -Compress
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($outboundJson)
@@ -154,7 +161,7 @@ function Start-ClientReceiveLoop {
                 break
             }
 
-            Broadcast-Json -InboundJson $text -State $SharedState
+            Broadcast-Json -ClientId $ClientId -InboundJson $text -State $SharedState
         }
     }
     finally {

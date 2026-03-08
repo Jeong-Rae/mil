@@ -10,19 +10,11 @@
   <main class="page">
     <section class="panel" id="connectPanel">
       <div class="sectionHeader">
-        <h2>Connect</h2>
+        <h2>Status</h2>
         <span id="connectionStatus" class="status-badge offline">Disconnected</span>
       </div>
       <p id="statusText">서버에 연결되지 않았습니다.</p>
-
-      <form id="connectForm">
-        <label class="field">
-          <span>Name</span>
-          <input id="nameInput" name="name" type="text" placeholder="alice" autocomplete="off" />
-        </label>
-
-        <button id="connectButton" type="submit">Connect</button>
-      </form>
+      <p id="connectHint">페이지를 열면 즉시 연결을 시도하고, 실패하면 자동으로 다시 시도합니다.</p>
     </section>
 
     <section class="panel" id="messagesPanel">

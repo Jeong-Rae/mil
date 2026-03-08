@@ -19,7 +19,8 @@ function Write-StaticResponse {
         $Context.Response.ContentType = "text/plain; charset=utf-8"
     }
     else {
-        $bytes = [System.IO.File]::ReadAllBytes($route[0])
+        $filePath = [System.IO.Path]::Combine($StaticRoot, $route[0])
+        $bytes = [System.IO.File]::ReadAllBytes($filePath)
         $Context.Response.StatusCode = 200
         $Context.Response.ContentType = $route[1]
     }

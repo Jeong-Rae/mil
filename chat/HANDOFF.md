@@ -1,5 +1,18 @@
 # Chat Handoff
 
+## 2026-03-08 (session 7)
+
+- `server.ps1` 을 실행한 작업 디렉토리를 `$StaticRoot` 로 고정해 두고, `chat/server/static.ps1` 는 정적 파일을 그 경로 기준으로 읽도록 수정했다.
+- 이 변경으로 `Write-StaticResponse` 가 런타임 현재 위치가 흔들리더라도 `/`, `/index.html`, `/app.js`, `/style.css` 를 `server.ps1` 실행 위치에서 안정적으로 찾는다.
+
+## 2026-03-08 (session 6)
+
+- 발신자 `name` 은 클라이언트 입력값이 아니라 WebSocket 요청 IP의 마지막 두 옥텟 `C.D` 로 서버가 직접 결정하도록 바꿨다.
+- `chat/server/main.ps1` 에서 `RemoteEndPoint` 기반 이름 계산을 추가하고, `chat/server/socket.ps1` 는 브로드캐스트 시 클라이언트가 보낸 `name` 을 무시한 채 서버가 저장한 이름을 다시 주입하도록 수정했다.
+- `chat/index.html` 에서 수동 연결 폼을 제거하고 상태 표시만 남겼다.
+- `chat/app.js` 는 페이지 로드 직후 즉시 연결을 시도하고, 연결 종료 시 2초 간격으로 계속 재시도하는 최소 자동 재연결 구조로 단순화했다.
+- `chat/SPEC.md` 도 클라이언트 메시지 형식, 서버가 붙이는 `name`, 자동 연결/자동 재시도 동작 기준에 맞춰 갱신했다.
+
 ## 2026-03-08 (session 5)
 
 - `chat/server.ps1` 의 listener 관련 설정을 조합식 상수 대신 literal 고정값으로 정리했다.

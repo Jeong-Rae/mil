@@ -1,9 +1,10 @@
 const SERVER_IP = window.location.hostname || "localhost";
 const SERVER_PORT = window.location.port || "9999";
 const SERVER_PATH = "/api/";
+const RECONNECT_DELAY_MS = 2000;
 
 let socket = null;
-let currentName = "";
+let reconnectTimer = null;
 let messageCount = 0;
 
 function $id(id) {
@@ -12,36 +13,23 @@ function $id(id) {
 
 function initializeApp() {
   attachEventListeners();
-  updateConnectionState("offline", "서버에 연결되지 않았습니다.");
+  updateConnectionState("connecting", "서버에 연결을 시도합니다.");
   updateMessageFormState();
   updateChatMeta();
+  connectSocket();
 }
 
 function attachEventListeners() {
-  $id("connectForm").addEventListener("submit", handleConnectSubmit);
   $id("messageForm").addEventListener("submit", handleMessageSubmit);
-}
-
-function handleConnectSubmit(event) {
-  const name = $id("nameInput").value.trim();
-
-  event.preventDefault();
-
-  if (!name) {
-    updateConnectionState("offline", "Name을 입력하세요.");
-    return;
-  }
-
-  currentName = name;
-  connectSocket();
 }
 
 function handleMessageSubmit(event) {
   event.preventDefault();
 
   if (!isSocketOpen()) {
-    updateConnectionState("offline", "연결 후 메시지를 전송하세요.");
+    updateConnectionState("offline", "연결이 복구되면 다시 전송하세요.");
     updateMessageFormState();
+    scheduleReconnect();
     return;
   }
 
@@ -52,12 +40,7 @@ function handleMessageSubmit(event) {
     return;
   }
 
-  const payload = {
-    name: currentName,
-    text: text
-  };
-
-  socket.send(JSON.stringify(payload));
+  socket.send(JSON.stringify({ text: text }));
   messageInput.value = "";
   messageInput.focus();
 }
@@ -65,7 +48,12 @@ function handleMessageSubmit(event) {
 function connectSocket() {
   const url = "ws://" + SERVER_IP + ":" + SERVER_PORT + SERVER_PATH;
 
-  closeExistingSocket();
+  if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+
+  clearReconnectTimer();
+  disposeSocket();
   updateConnectionState("connecting", "서버에 연결 중입니다: " + url);
   updateMessageFormState();
 
@@ -76,7 +64,7 @@ function connectSocket() {
   socket.addEventListener("error", handleSocketError);
 }
 
-function closeExistingSocket() {
+function disposeSocket() {
   if (!socket) {
     return;
   }
@@ -85,15 +73,35 @@ function closeExistingSocket() {
   socket.removeEventListener("message", handleSocketMessage);
   socket.removeEventListener("close", handleSocketClose);
   socket.removeEventListener("error", handleSocketError);
-
-  if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-    socket.close();
-  }
-
   socket = null;
 }
 
-function handleSocketOpen() {
+function scheduleReconnect() {
+  if (reconnectTimer) {
+    return;
+  }
+
+  reconnectTimer = window.setTimeout(function () {
+    reconnectTimer = null;
+    connectSocket();
+  }, RECONNECT_DELAY_MS);
+}
+
+function clearReconnectTimer() {
+  if (!reconnectTimer) {
+    return;
+  }
+
+  window.clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+}
+
+function handleSocketOpen(event) {
+  if (event.target !== socket) {
+    return;
+  }
+
+  clearReconnectTimer();
   updateConnectionState("online", "연결되었습니다. 메시지를 보낼 수 있습니다.");
   updateMessageFormState();
   $id("messageInput").focus();
@@ -112,14 +120,25 @@ function handleSocketMessage(event) {
   appendMessage(payload);
 }
 
-function handleSocketClose() {
-  updateConnectionState("offline", "연결이 종료되었습니다.");
+function handleSocketClose(event) {
+  if (event.target !== socket) {
+    return;
+  }
+
+  disposeSocket();
+  updateConnectionState("offline", "연결이 종료되었습니다. 2초 후 다시 시도합니다.");
   updateMessageFormState();
+  scheduleReconnect();
 }
 
-function handleSocketError() {
-  updateConnectionState("offline", "소켓 오류가 발생했습니다.");
+function handleSocketError(event) {
+  if (event.target !== socket) {
+    return;
+  }
+
+  updateConnectionState("offline", "연결에 실패했습니다. 종료 후 다시 시도합니다.");
   updateMessageFormState();
+  scheduleReconnect();
 }
 
 function isSocketOpen() {

@@ -56,13 +56,12 @@ h2,
 }
 
 #statusText,
+#connectHint,
 #chatMeta,
-.field span,
 .message-time {
   color: #6b7280;
 }
 
-#connectForm,
 #messageForm,
 .message-header {
   display: flex;
@@ -70,14 +69,6 @@ h2,
   align-items: flex-end;
 }
 
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  flex: 1 1 auto;
-}
-
-#nameInput,
 #messageInput {
   flex: 1 1 auto;
   height: 40px;
@@ -87,7 +78,6 @@ h2,
   font: inherit;
 }
 
-#connectButton,
 #sendButton {
   min-width: 120px;
   height: 40px;
@@ -99,9 +89,7 @@ h2,
   cursor: pointer;
 }
 
-#nameInput:disabled,
 #messageInput:disabled,
-#connectButton:disabled,
 #sendButton:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -142,13 +130,11 @@ h2,
 }
 
 @media (max-width: 640px) {
-  #connectForm,
   #messageForm {
     flex-direction: column;
     align-items: stretch;
   }
 
-  #connectButton,
   #sendButton {
     width: 100%;
   }

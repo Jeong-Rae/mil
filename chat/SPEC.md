@@ -91,16 +91,15 @@ ws://{server-ip}:{port}/
 
 ```json
 {
-  "name": "alice",
   "text": "hello"
 }
 ```
 
 Rules:
 
-- `name` 과 `text` 는 올바른 값이 들어온다고 가정한다.
+- `text` 는 올바른 값이 들어온다고 가정한다.
 - 서버는 길이, null, 형식에 대한 과도한 검증을 하지 않는다.
-- 서버는 메시지를 저장하지 않고 바로 브로드캐스트 대상으로 사용한다.
+- 서버는 발신자 식별값을 요청 IP 기준으로 직접 붙이고, 메시지를 저장하지 않은 채 바로 브로드캐스트한다.
 
 ### Server -> Client message
 
@@ -108,7 +107,7 @@ Rules:
 
 ```json
 {
-  "name": "alice",
+  "name": "0.12",
   "text": "hello",
   "sentAt": "2026-03-07T12:00:00Z"
 }
@@ -116,8 +115,9 @@ Rules:
 
 Rules:
 
+- `name` 은 클라이언트의 요청 IP 마지막 두 옥텟 `C.D` 문자열을 사용한다.
 - `sentAt` 은 서버 시각 기준 ISO8601 문자열을 사용한다.
-- 서버는 수신 메시지를 거의 그대로 전달하고, 필요 시 `sentAt` 만 추가한다.
+- 서버는 수신 메시지에 `name`, `sentAt` 을 덧붙여 전달한다.
 - 별도의 ack, delivery id, error code 계약은 두지 않는다.
 
 ## 7. HTTP Scope
@@ -147,18 +147,15 @@ Rules:
 - 또는 `client.ps1` 실행 후 `http://localhost:3000/` 으로 연다.
 - `client.ps1` 실행 예시: `.\client.ps1 C:\chat`
 - 화면에는 최소한 아래 요소만 둔다.
-  - server ip 입력
-  - port 입력
-  - name 입력
-  - connect button
+  - connection status
   - message list
   - text input
   - send button
-- Connect 후 WebSocket 연결을 연다.
+- 페이지 진입 직후 WebSocket 연결을 연다.
 - 사용자가 입력한 텍스트는 JSON 메시지로 서버에 전송한다.
 - 수신한 메시지는 즉시 화면 목록에 추가한다.
 - 연결 상태는 단순 텍스트로 표시한다.
-- 자동 재연결은 선택 사항이며, 넣더라도 고정 지연 기반의 가장 단순한 방식만 사용한다.
+- 연결 실패나 종료 뒤에는 고정 지연 기반의 가장 단순한 자동 재연결을 계속 시도한다.
 
 ## 10. Non-Goals
 

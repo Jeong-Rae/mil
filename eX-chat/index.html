@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>eX-chat</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div>
+        <h1>eX-chat</h1>
+        <p class="sub">Single room chat for internal network</p>
+      </div>
+      <div class="status-wrap">
+        <span id="conn-state" class="badge badge-warn">connecting</span>
+      </div>
+    </header>
+
+    <section id="messages" class="messages" aria-live="polite"></section>
+
+    <form id="chat-form" class="composer">
+      <input
+        id="chat-input"
+        type="text"
+        maxlength="500"
+        placeholder="Type a message"
+        autocomplete="off"
+      >
+      <button type="submit">Send</button>
+    </form>
+  </main>
+
+  <script src="/script.js"></script>
+</body>
+</html>

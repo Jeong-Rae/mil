@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>chat</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div>
+        <h1>chat</h1>
+        <p class="sub">HTTP-only single room chat</p>
+      </div>
+      <span id="conn-state" class="badge badge-warn">starting</span>
+    </header>
+
+    <section id="messages" class="messages" aria-live="polite"></section>
+
+    <form id="chat-form" class="composer">
+      <input
+        id="chat-input"
+        type="text"
+        maxlength="500"
+        placeholder="Type a message"
+        autocomplete="off"
+      >
+      <button id="send-button" type="submit">Send</button>
+    </form>
+  </main>
+
+  <script src="/script.js"></script>
+</body>
+</html>

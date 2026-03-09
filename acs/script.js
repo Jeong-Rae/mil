@@ -106,10 +106,6 @@ function markRecentScan(location, rawBarcode) {
   recentScans[getDuplicateKey(location, rawBarcode)] = Date.now();
 }
 
-function fetchStatus(location) {
-  return fetchJson("/status?location=" + encodeURIComponent(location));
-}
-
 function fetchAllStatus() {
   return fetchJson("/status");
 }
@@ -122,15 +118,6 @@ function postAccess(payload) {
     },
     body: JSON.stringify(payload)
   });
-}
-
-async function refreshScannerStatus(location) {
-  if (!location) {
-    return [];
-  }
-
-  const payload = await fetchStatus(location);
-  return Array.isArray(payload && payload.ids) ? payload.ids.slice() : [];
 }
 
 function createElement(tagName, className, text) {
@@ -168,22 +155,8 @@ function showAccessResult(parsed) {
   showMessage(`${parsed.id}님 ${action}입니다`, "ok");
 }
 
-function handleDuplicateSubmit(parsed, location, alreadyEntered, input) {
+function handleDuplicateSubmit(parsed, location, input) {
   if (shouldIgnoreDuplicate(location, parsed.raw)) {
-    showDuplicateResult(parsed);
-    resetInput(input);
-    return true;
-  }
-
-  if (parsed.type === "entry" && alreadyEntered) {
-    markRecentScan(location, parsed.raw);
-    showDuplicateResult(parsed);
-    resetInput(input);
-    return true;
-  }
-
-  if (parsed.type === "exit" && !alreadyEntered) {
-    markRecentScan(location, parsed.raw);
     showDuplicateResult(parsed);
     resetInput(input);
     return true;
@@ -296,17 +269,7 @@ async function handleSubmit(event) {
     return;
   }
 
-  let ids;
-
-  try {
-    ids = await refreshScannerStatus(location);
-  } catch (error) {
-    showMessage(error.message || "상태 조회에 실패했습니다.", "error");
-    resetInput(input);
-    return;
-  }
-
-  if (handleDuplicateSubmit(parsed, location, ids.includes(parsed.id), input)) {
+  if (handleDuplicateSubmit(parsed, location, input)) {
     return;
   }
 
@@ -320,8 +283,6 @@ async function handleSubmit(event) {
     markRecentScan(location, parsed.raw);
     showAccessResult(parsed);
     clearInput(input);
-
-    await refreshScannerStatus(location);
   } catch (error) {
     showMessage(error.message || "처리에 실패했습니다.", "error");
     clearInput(input);

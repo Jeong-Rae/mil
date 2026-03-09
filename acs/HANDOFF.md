@@ -3,6 +3,10 @@
 ## 2026-03-09
 
 ### 작업 요약
+- `acs/server.ps1`의 현재 상태 갱신을 location overwrite 구조로 조정함.
+  - `entry`/`exit`와 무관하게 전체 현황의 위치는 마지막으로 입력된 `location`으로 덮어씀
+  - 현황에 없던 사람이 먼저 `exit`를 보내도 성공하고, 해당 `location`이 현재 위치가 됨
+- `acs/script.js`의 스캐너 중복 처리를 상태 조회 기반이 아니라 `같은 gate + 같은 바코드 + 15초` 기준으로 단순화함.
 - `acs/script.js`의 `handleSubmit()` 복잡도를 줄이기 위해 중복 처리/메시지/입력 정리 로직을 helper로 분리함.
 - `acs/script.js`의 비동기 흐름을 Promise chain 대신 `async`/`await` 중심으로 정리함.
 - `acs/script.js`의 DOM 접근을 전역 element 캐싱 대신 `$()` 조회 방식으로 정리함.
@@ -21,6 +25,9 @@
 
 ### 다음 세션 인계 포인트
 - 현재 ACS 서버는 `type`/`location`은 기존처럼 신뢰하지만, `id`는 `acs/list.json`에 있어야만 로그에 기록한다.
+- 현재 상태는 군번 기준 last write win이다.
+  - `entry`/`exit`는 로그에는 남지만, 전체 현황 위치 계산은 마지막 `location`만 사용한다.
+  - 현황에 없던 군번이 `exit`부터 와도 거부하지 않고 그 `location`으로 반영한다.
 - `list.json`이 없거나 JSON 파싱에 실패하면 서버 시작 단계에서 예외로 종료된다. 현재 단계에서는 fallback을 두지 않았다.
 
 ### 작업 요약

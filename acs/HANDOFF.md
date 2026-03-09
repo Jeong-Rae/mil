@@ -1,5 +1,42 @@
 # HANDOFF
 
+## 2026-03-09
+
+### 작업 요약
+- `acs/SPEC.md`를 현재 합의된 중앙 서버 구조에 맞게 전면 수정함.
+- ACS를 gate별 개별 실행형 로컬 스캐너 서비스가 아니라, 요청을 수집하는 가벼운 중앙 PowerShell 서버로 재정의함.
+- 역할 분리를 문서에 명시함:
+  - client가 바코드를 읽고 `type`, `id`, `location`을 만든다.
+  - client가 location별 중복 예외 처리를 담당한다.
+  - server는 요청을 신뢰하고 기록과 현재 상태만 관리한다.
+- 필요 API를 두 개로 고정함:
+  - `POST /access`
+  - `GET /status?location=...`
+- 기록용 데이터와 현재 상태 데이터를 분리한다고 문서화함:
+  - 기록은 CSV append-only
+  - 현재 상태는 서버 메모리
+  - 재시작 시 CSV를 읽어 메모리 상태 복원
+- `acs/BARCODE_SERIAL_PLAN.md`를 현행 서버 범위 밖 문서로 축소 정리함.
+- 이번 세션에서는 코드 구현을 하지 않았고, 문서만 갱신함.
+
+### 산출물
+- `acs/SPEC.md`
+  - 중앙 HTTP 서버 기준으로 전면 재작성
+  - 서버 측 decode, server-side dedupe, `list.json`, 이름 조회, `serial`, `-Place` 실행 전제 제거
+  - `POST /access`, `GET /status?location=...` 계약 추가
+  - 기록 CSV(`time,type,location,id`)와 메모리 상태 분리 규칙 추가
+- `acs/BARCODE_SERIAL_PLAN.md`
+  - 기존 packed/decode/serial 설계는 현재 서버 범위 밖이라는 메모로 축소
+
+### 다음 세션 인계 포인트
+- 다음 구현 단계는 문서 기준으로만 진행한다. 기존 HANDOFF 하단의 `ACS.ps1`/`Start-ACS`/decode 관련 이력은 과거 기록으로 남아 있지만, 현재 SPEC 기준 구현 대상으로 보면 안 된다.
+- 구현 시 서버는 가볍게 유지해야 한다.
+  - client 입력을 신뢰
+  - 최소 검증만 수행
+  - 기록 CSV와 메모리 상태만 관리
+- 현재 상태 조회는 특정 `location`의 현재 입영 인원 `id` 목록 반환만 요구된다.
+- 코드 구현은 아직 시작하지 않았다.
+
 ## 2026-03-06
 
 ### 작업 요약

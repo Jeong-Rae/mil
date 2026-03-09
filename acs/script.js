@@ -1,15 +1,9 @@
 const DUPLICATE_WINDOW_MS = 15000;
 const BOARD_POLL_MS = 5000;
 
-const scanFormEl = document.getElementById("scan-form");
-const locationInputEl = document.getElementById("location-input");
-const barcodeInputEl = document.getElementById("barcode-input");
-const messageTextEl = document.getElementById("message-text");
-
-const boardGroupsEl = document.getElementById("board-groups");
-const boardStatusEl = document.getElementById("board-status");
-const boardUpdatedEl = document.getElementById("board-updated");
-const refreshBoardButtonEl = document.getElementById("refresh-board-button");
+function $(id) {
+  return document.getElementById(id);
+}
 
 let boardTimerId = null;
 const recentScans = {};
@@ -40,6 +34,7 @@ function fetchJson(url, options) {
 }
 
 function showMessage(text, tone) {
+  const messageTextEl = $("message-text");
   if (!messageTextEl) {
     return;
   }
@@ -52,17 +47,25 @@ function showMessage(text, tone) {
 }
 
 function focusBarcodeInput() {
+  const barcodeInputEl = $("barcode-input");
   if (!barcodeInputEl) {
     return;
   }
 
   window.setTimeout(function () {
+    const locationInputEl = $("location-input");
+    const nextBarcodeInputEl = $("barcode-input");
+
+    if (!nextBarcodeInputEl) {
+      return;
+    }
+
     if (document.activeElement === locationInputEl) {
       return;
     }
 
-    barcodeInputEl.focus();
-    barcodeInputEl.select();
+    nextBarcodeInputEl.focus();
+    nextBarcodeInputEl.select();
   }, 0);
 }
 
@@ -132,51 +135,72 @@ function refreshScannerStatus(location) {
   });
 }
 
+function createElement(tagName, className, text) {
+  const element = document.createElement(tagName);
+
+  if (className) {
+    element.className = className;
+  }
+
+  if (typeof text !== "undefined") {
+    element.textContent = text;
+  }
+
+  return element;
+}
+
 function renderBoard(groups) {
+  const boardGroupsEl = $("board-groups");
   if (!boardGroupsEl) {
     return;
   }
 
   const items = Array.isArray(groups) ? groups : [];
+  const fragment = document.createDocumentFragment();
+
   if (items.length === 0) {
-    boardGroupsEl.innerHTML = [
-      '<article class="board-card empty-card">',
-      "<h2>현황 없음</h2>",
-      "<p>아직 데이터가 없습니다.</p>",
-      "</article>"
-    ].join("");
+    const cardEl = createElement("article", "board-card empty-card");
+    cardEl.appendChild(createElement("h2", "", "현황 없음"));
+    cardEl.appendChild(createElement("p", "", "아직 데이터가 없습니다."));
+    fragment.appendChild(cardEl);
+    boardGroupsEl.replaceChildren(fragment);
     return;
   }
 
-  boardGroupsEl.innerHTML = items.map(function (group) {
+  items.forEach(function (group) {
     const location = group && group.location ? String(group.location) : "unknown";
     const ids = Array.isArray(group && group.ids) ? group.ids : [];
-    const listMarkup = ids.length === 0
-      ? '<li class="empty-item">현재 인원 없음</li>'
-      : ids.map(function (id) {
-          return '<li class="id-item">' + escapeHtml(id) + "</li>";
-        }).join("");
+    const cardEl = createElement("article", "board-card");
+    const listEl = createElement("ul", "id-list");
 
-    return [
-      '<article class="board-card">',
-      "<h2>" + escapeHtml(location) + "</h2>",
-      '<div class="board-count">인원 ' + ids.length + "명</div>",
-      '<ul class="id-list">' + listMarkup + "</ul>",
-      "</article>"
-    ].join("");
-  }).join("");
+    cardEl.appendChild(createElement("h2", "", location));
+    cardEl.appendChild(createElement("div", "board-count", "인원 " + ids.length + "명"));
+
+    if (ids.length === 0) {
+      listEl.appendChild(createElement("li", "empty-item", "현재 인원 없음"));
+    } else {
+      ids.forEach(function (id) {
+        listEl.appendChild(createElement("li", "id-item", id));
+      });
+    }
+
+    cardEl.appendChild(listEl);
+    fragment.appendChild(cardEl);
+  });
+
+  boardGroupsEl.replaceChildren(fragment);
 }
 
 function refreshBoard() {
+  const boardGroupsEl = $("board-groups");
   if (!boardGroupsEl) {
     return Promise.resolve();
   }
 
-  if (boardStatusEl) {
-    boardStatusEl.textContent = "갱신 중";
-  }
-
   return fetchAllStatus().then(function (payload) {
+    const boardStatusEl = $("board-status");
+    const boardUpdatedEl = $("board-updated");
+
     renderBoard(payload);
     if (boardStatusEl) {
       boardStatusEl.textContent = "정상";
@@ -184,14 +208,17 @@ function refreshBoard() {
     if (boardUpdatedEl) {
       boardUpdatedEl.textContent = new Date().toLocaleString();
     }
-  }).catch(function (error) {
+  }).catch(function () {
+    const boardStatusEl = $("board-status");
+
     if (boardStatusEl) {
-      boardStatusEl.textContent = error.message || "갱신 실패";
+      boardStatusEl.textContent = "실패";
     }
   });
 }
 
 function startBoardPolling() {
+  const boardGroupsEl = $("board-groups");
   if (!boardGroupsEl) {
     return;
   }
@@ -205,18 +232,11 @@ function startBoardPolling() {
   }, BOARD_POLL_MS);
 }
 
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
 function handleSubmit(event) {
   event.preventDefault();
 
+  const locationInputEl = $("location-input");
+  const barcodeInputEl = $("barcode-input");
   const location = locationInputEl ? locationInputEl.value.trim() : "";
   const parsed = parseBarcode(barcodeInputEl ? barcodeInputEl.value : "");
 
@@ -307,6 +327,9 @@ function handleSubmit(event) {
 }
 
 function initScannerPage() {
+  const scanFormEl = $("scan-form");
+  const barcodeInputEl = $("barcode-input");
+
   if (!scanFormEl || !barcodeInputEl) {
     return;
   }
@@ -336,6 +359,8 @@ function initScannerPage() {
   });
 
   document.addEventListener("click", function (event) {
+    const locationInputEl = $("location-input");
+
     if (event.target === locationInputEl) {
       return;
     }
@@ -347,6 +372,9 @@ function initScannerPage() {
 }
 
 function initBoardPage() {
+  const boardGroupsEl = $("board-groups");
+  const refreshBoardButtonEl = $("refresh-board-button");
+
   if (!boardGroupsEl) {
     return;
   }

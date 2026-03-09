@@ -137,6 +137,24 @@ function Get-StringField {
     return [string]$property.Value
 }
 
+function Import-AllowedIds {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ListPath
+    )
+
+    $items = Get-Content -LiteralPath $ListPath -Raw | ConvertFrom-Json
+    $allowedIds = @{}
+
+    foreach ($item in @($items)) {
+        $id = Get-StringField -Object $item -Name "id"
+        if ([string]::IsNullOrWhiteSpace($id)) { continue }
+        $allowedIds[$id] = $true
+    }
+
+    return $allowedIds
+}
+
 function New-AccessLogFile {
     param(
         [Parameter(Mandatory = $true)]
@@ -394,7 +412,10 @@ function Invoke-AccessRoute {
         [hashtable]$State,
 
         [Parameter(Mandatory = $true)]
-        [string]$LogPath
+        [string]$LogPath,
+
+        [Parameter(Mandatory = $true)]
+        [hashtable]$AllowedIds
     )
 
     $payload = Read-AccessPayload -Request $Request -Response $Response
@@ -411,6 +432,11 @@ function Invoke-AccessRoute {
 
     if ($type -ne "entry" -and $type -ne "exit") {
         Send-RejectedResponse -Response $Response -Message "type must be entry or exit"
+        return $true
+    }
+
+    if (-not $AllowedIds.ContainsKey($id)) {
+        Send-RejectedResponse -Response $Response -Message "id is not allowed"
         return $true
     }
 
@@ -435,7 +461,10 @@ function Invoke-ApiRoute {
         [hashtable]$State,
 
         [Parameter(Mandatory = $true)]
-        [string]$LogPath
+        [string]$LogPath,
+
+        [Parameter(Mandatory = $true)]
+        [hashtable]$AllowedIds
     )
 
     $request = $Context.Request
@@ -444,7 +473,7 @@ function Invoke-ApiRoute {
     $method = $request.HttpMethod.ToUpperInvariant()
 
     if ($method -eq "GET" -and $path -eq "/status") { return (Invoke-StatusRoute -Response $response -State $State -Location ([string]$request.QueryString["location"])) }
-    if ($method -eq "POST" -and $path -eq "/access") { return (Invoke-AccessRoute -Request $request -Response $response -State $State -LogPath $LogPath) }
+    if ($method -eq "POST" -and $path -eq "/access") { return (Invoke-AccessRoute -Request $request -Response $response -State $State -LogPath $LogPath -AllowedIds $AllowedIds) }
 
     return $false
 }
@@ -461,17 +490,22 @@ function Invoke-Request {
         [hashtable]$State,
 
         [Parameter(Mandatory = $true)]
-        [string]$LogPath
+        [string]$LogPath,
+
+        [Parameter(Mandatory = $true)]
+        [hashtable]$AllowedIds
     )
 
     if (Invoke-StaticResourceRoute -Context $Context -AppRoot $AppRoot) { return }
-    if (Invoke-ApiRoute -Context $Context -State $State -LogPath $LogPath) { return }
+    if (Invoke-ApiRoute -Context $Context -State $State -LogPath $LogPath -AllowedIds $AllowedIds) { return }
     Send-TextResponse -Response $Context.Response -Text "Not Found" -StatusCode 404
 }
 
 function Start-AcsServer {
     $appRoot = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { (Get-Location).Path } else { $PSScriptRoot }
     $logPath = Join-Path $appRoot "logs/access-log.csv"
+    $listPath = Join-Path $appRoot "list.json"
+    $allowedIds = Import-AllowedIds -ListPath $listPath
 
     $state = @{
         Current = @{}
@@ -487,6 +521,7 @@ function Start-AcsServer {
     Write-Host ("ACS listening on {0}" -f $prefix)
     Write-Host ("App root: {0}" -f $appRoot)
     Write-Host ("Log path: {0}" -f $logPath)
+    Write-Host ("List path: {0}" -f $listPath)
 
     try {
         $listener.Start()
@@ -495,7 +530,7 @@ function Start-AcsServer {
             $context = $listener.GetContext()
 
             try {
-                Invoke-Request -Context $context -AppRoot $appRoot -State $state -LogPath $logPath
+                Invoke-Request -Context $context -AppRoot $appRoot -State $state -LogPath $logPath -AllowedIds $allowedIds
             } catch {
                 Send-InternalServerError -Response $context.Response
             }

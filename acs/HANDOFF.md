@@ -3,6 +3,24 @@
 ## 2026-03-09
 
 ### 작업 요약
+- `acs/script.js`의 DOM 접근을 전역 element 캐싱 대신 `$()` 조회 방식으로 정리함.
+- `acs/script.js`의 보드 렌더링에서 `innerHTML` 문자열 조합을 제거하고 DOM 생성 + `replaceChildren` 방식으로 변경함.
+- `acs/board.html`, `acs/script.js`의 보드 상태 표시를 `정상`/`실패` 2개 상태로 단순화함.
+  - 갱신 중에는 상태 문구를 바꾸지 않음
+  - 조회 성공 시 `정상`
+  - 조회 실패 시 `실패`
+- `acs/server.ps1`에 `list.json` 허용 군번 검증을 추가함.
+  - 서버 시작 시 `list.json`을 읽어 허용 군번 집합을 로드함.
+  - `POST /access`는 `list.json`에 없는 `id`면 기록 전에 `400` + `{status:"rejected",message:"id is not allowed"}`로 거부함.
+- `acs/SPEC.md`를 현재 동작에 맞게 보정함.
+  - 현재 단계 포함 범위에 `list.json` 기반 허용 군번 검증 추가
+  - 서버 책임과 요청 흐름에 허용 군번 검증 단계 반영
+
+### 다음 세션 인계 포인트
+- 현재 ACS 서버는 `type`/`location`은 기존처럼 신뢰하지만, `id`는 `acs/list.json`에 있어야만 로그에 기록한다.
+- `list.json`이 없거나 JSON 파싱에 실패하면 서버 시작 단계에서 예외로 종료된다. 현재 단계에서는 fallback을 두지 않았다.
+
+### 작업 요약
 - `acs/server.ps1`, `acs/index.html`, `acs/board.html`, `acs/script.js`, `acs/style.css`를 신규 구현함.
 - `server.ps1`를 함수 분리 구조로 작성함:
   - `Start-AcsServer`

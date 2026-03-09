@@ -46,6 +46,7 @@ ACS의 목적은 다음과 같다.
 - 중앙 HTTP 서버 1개 실행
 - 정적 웹 파일 서빙(`index.html`, `board.html`, `script.js`, `style.css`)
 - 입퇴영 요청 수신
+- `list.json` 기반 허용 군번 검증
 - CSV append-only 기록 저장
 - 메모리 기반 현재 상태 유지
 - 특정 location의 현재 입영 인원 조회
@@ -56,7 +57,6 @@ ACS의 목적은 다음과 같다.
 - 서버 측 바코드 decode
 - 서버 측 entry/exit 판별
 - 서버 측 location별 중복 예외 처리
-- 장병 목록 파일 조회
 - 이름 조회
 - 인증/인가
 - 외부 공개 운영
@@ -80,6 +80,7 @@ ACS의 목적은 다음과 같다.
 
 - HTTP 요청 수신
 - 요청 본문에서 `type`, `id`, `location` 읽기
+- `list.json`에 있는 군번인지 확인
 - 기록 CSV에 append
 - 현재 상태 메모리 갱신
 - location별 현재 입영 인원 조회 응답
@@ -92,7 +93,8 @@ ACS의 목적은 다음과 같다.
 
 따라서 서버는 아래 원칙을 따른다.
 
-- client가 보낸 `type`, `id`, `location`을 신뢰한다.
+- client가 보낸 `type`, `location`은 신뢰한다.
+- `id`는 `list.json`에 있는 군번만 허용한다.
 - 과도한 형식 검증을 하지 않는다.
 - 복잡한 복구, fallback, 방어 로직을 넣지 않는다.
 - 요청 처리 실패가 전체 서버 종료로 이어지지 않도록 얇은 보호만 둔다.
@@ -210,9 +212,10 @@ GET /status
 
 1. client가 `type`, `id`, `location`을 전송한다.
 2. 서버가 요청 값을 읽는다.
-3. 서버가 CSV에 한 줄 append 한다.
-4. 서버가 메모리의 현재 상태를 갱신한다.
-5. 서버가 `logged` 응답을 반환한다.
+3. 서버가 `id`가 `list.json`에 있는지 확인한다.
+4. 서버가 CSV에 한 줄 append 한다.
+5. 서버가 메모리의 현재 상태를 갱신한다.
+6. 서버가 `logged` 응답을 반환한다.
 
 ### 9.2 상태 갱신 규칙
 

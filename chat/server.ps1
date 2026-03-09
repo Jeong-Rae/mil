@@ -363,6 +363,7 @@ function Start-ChatServer {
         Write-Host "chat listening on http://+:8888/"
 
         while ($listener.IsListening) {
+            
             Cleanup-RequestHandlers -Handlers $handlers
 
             $context = $listener.GetContext()

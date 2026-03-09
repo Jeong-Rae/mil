@@ -3,39 +3,79 @@
 ## 2026-03-09
 
 ### 작업 요약
-- `acs/SPEC.md`를 현재 합의된 중앙 서버 구조에 맞게 전면 수정함.
-- ACS를 gate별 개별 실행형 로컬 스캐너 서비스가 아니라, 요청을 수집하는 가벼운 중앙 PowerShell 서버로 재정의함.
-- 역할 분리를 문서에 명시함:
-  - client가 바코드를 읽고 `type`, `id`, `location`을 만든다.
-  - client가 location별 중복 예외 처리를 담당한다.
-  - server는 요청을 신뢰하고 기록과 현재 상태만 관리한다.
-- 필요 API를 두 개로 고정함:
-  - `POST /access`
-  - `GET /status?location=...`
-- 기록용 데이터와 현재 상태 데이터를 분리한다고 문서화함:
-  - 기록은 CSV append-only
-  - 현재 상태는 서버 메모리
-  - 재시작 시 CSV를 읽어 메모리 상태 복원
-- `acs/BARCODE_SERIAL_PLAN.md`를 현행 서버 범위 밖 문서로 축소 정리함.
-- 이번 세션에서는 코드 구현을 하지 않았고, 문서만 갱신함.
+- `acs/server.ps1`, `acs/index.html`, `acs/board.html`, `acs/script.js`, `acs/style.css`를 신규 구현함.
+- `server.ps1`를 함수 분리 구조로 작성함:
+  - `Main`
+  - `Route-Static-Resource`
+  - `Route-API`
+  - `Write-Tuple`
+  - `Update-Current-Status`
+  - `Get-Current-Status`
+  - `Get-All-Current-Status`
+  - `Restore-Current-Status`
+- 중앙 서버가 정적 파일 서빙, `POST /access`, `GET /status`, `GET /status?location=...`를 제공하도록 구현함.
+- 로그를 `logs/access-log.csv`에 `time,type,location,id` 형식으로 append 저장하도록 구현함.
+- 서버 시작 시 기존 CSV를 읽어 현재 상태 메모리를 복원하도록 구현함.
+- `index.html`을 스캐너 입력 화면으로 구현함.
+  - `location` 입력칸
+  - barcode 입력칸
+  - 처리 결과 메시지 영역
+  - `board.html` 이동 링크
+- `board.html`을 전체 location 현황판으로 구현함.
+  - 전체 location 현재 인원 표시
+  - 수동 새로고침 버튼
+  - `index.html` 이동 링크
+- `script.js`를 두 페이지 공용으로 구현함.
+  - 함수는 모두 top-level에 둠
+  - `body` 끝에서 로드되는 전제
+  - `EN`/`EX` 바코드 파싱
+  - Enter/CRLF 자동 submit
+  - barcode input 상시 포커스 유지
+  - 클라이언트 상태 기반 중복 안내
+  - board 5초 polling + 수동 새로고침
+- `POST /access` 거부 시 `{status,message}` JSON 응답을 반환하고, 클라이언트는 메시지 영역에 오류를 표시한 뒤 포커스를 복귀하도록 구현함.
+- strict mode에서 누락 필드 접근이 500으로 튀는 문제를 수정함.
+  - 서버 요청 필드는 안전한 helper로 읽도록 변경
+  - 누락 필드 요청은 `400` + `{status:"rejected",message:"type, id, location are required"}` 로 응답함
+- `acs/SPEC.md`를 구현에 맞게 보정함.
+  - 엔트리 파일을 `server.ps1`로 수정
+  - 정적 파일 서빙 추가
+  - `GET /status` 전체 현황 응답 추가
 
 ### 산출물
+- `acs/server.ps1`
+  - 중앙 HTTP 서버 구현
+  - 정적 파일 라우팅 + API 라우팅
+  - CSV append + 메모리 상태 관리 + 재시작 복원
+- `acs/index.html`
+  - 스캐너 입력 화면
+- `acs/board.html`
+  - 전체 현황판 화면
+- `acs/script.js`
+  - 공용 프론트 로직
+- `acs/style.css`
+  - 공용 스타일
 - `acs/SPEC.md`
-  - 중앙 HTTP 서버 기준으로 전면 재작성
-  - 서버 측 decode, server-side dedupe, `list.json`, 이름 조회, `serial`, `-Place` 실행 전제 제거
-  - `POST /access`, `GET /status?location=...` 계약 추가
-  - 기록 CSV(`time,type,location,id`)와 메모리 상태 분리 규칙 추가
+  - `server.ps1` 기준으로 보정
+  - `GET /status` 전체 현황 응답 추가
 - `acs/BARCODE_SERIAL_PLAN.md`
   - 기존 packed/decode/serial 설계는 현재 서버 범위 밖이라는 메모로 축소
 
 ### 다음 세션 인계 포인트
-- 다음 구현 단계는 문서 기준으로만 진행한다. 기존 HANDOFF 하단의 `ACS.ps1`/`Start-ACS`/decode 관련 이력은 과거 기록으로 남아 있지만, 현재 SPEC 기준 구현 대상으로 보면 안 된다.
+- 기존 HANDOFF 하단의 `ACS.ps1`/`Start-ACS`/decode 관련 이력은 과거 기록이다. 현재 구현 기준 엔트리 파일은 `server.ps1`이다.
 - 구현 시 서버는 가볍게 유지해야 한다.
   - client 입력을 신뢰
   - 최소 검증만 수행
   - 기록 CSV와 메모리 상태만 관리
-- 현재 상태 조회는 특정 `location`의 현재 입영 인원 `id` 목록 반환만 요구된다.
-- 코드 구현은 아직 시작하지 않았다.
+- 현재 상태 조회는 두 경로가 있다.
+  - `GET /status?location=...`: 특정 location
+  - `GET /status`: 전체 location
+- 검증 완료:
+  - `pwsh -NoLogo -NoProfile -File ./server.ps1`
+  - `curl -sS -X POST http://127.0.0.1:8888/access ...`
+  - `curl -sS http://127.0.0.1:8888/status?location=gate-1`
+  - `curl -sS http://127.0.0.1:8888/status`
+  - `curl -sS -X POST http://127.0.0.1:8888/access -H 'Content-Type: application/json' --data '{"id":"oops"}'`
 
 ## 2026-03-06
 

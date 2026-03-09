@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ACS Scanner</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="scanner-page">
+  <main class="page scanner-shell">
+    <header class="topbar">
+      <div>
+        <h1>ACS Scanner</h1>
+        <p class="sub">리더기로 바코드를 입력하면 즉시 처리합니다.</p>
+      </div>
+      <a class="link-button" href="/board.html">현황판 보기</a>
+    </header>
+
+    <section class="panel">
+      <form id="scan-form" class="scan-form">
+        <label class="field">
+          <span>Location</span>
+          <input id="location-input" type="text" autocomplete="off" placeholder="gate-1">
+        </label>
+
+        <label class="field">
+          <span>Barcode</span>
+          <input id="barcode-input" type="text" autocomplete="off" placeholder="ENa25-76046946">
+        </label>
+      </form>
+
+      <section class="message-panel" aria-live="polite">
+        <div class="message-label">처리 결과</div>
+        <div id="message-text" class="message-text">대기 중</div>
+      </section>
+    </section>
+  </main>
+  <script src="/script.js"></script>
+</body>
+</html>

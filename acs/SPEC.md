@@ -19,7 +19,7 @@ ACS는 군부대 장병의 입영 및 퇴영 기록을 중앙에서 수집하고
 
 - 구현 언어: PowerShell
 - 실행 환경: Windows PowerShell 5.x
-- 엔트리 파일: `ACS.ps1`
+- 엔트리 파일: `server.ps1`
 - 문서 기준: 본 Spec은 중앙 서버 기준의 최소 구현을 정의한다.
 - 구현 원칙:
   - `AUDIT.md`의 최소 구현, 최소 검증 원칙을 따른다.
@@ -44,6 +44,7 @@ ACS의 목적은 다음과 같다.
 ### 4.1 현재 단계 포함 범위
 
 - 중앙 HTTP 서버 1개 실행
+- 정적 웹 파일 서빙(`index.html`, `board.html`, `script.js`, `style.css`)
 - 입퇴영 요청 수신
 - CSV append-only 기록 저장
 - 메모리 기반 현재 상태 유지
@@ -174,6 +175,32 @@ GET /status?location=gate-1
 
 - 특정 location만 조회한다.
 - 응답은 현재 `entry` 상태인 군번 `id` 목록을 반환한다.
+
+### 8.3 전체 현황 조회
+
+```text
+GET /status
+```
+
+정상 응답 예시:
+
+```json
+[
+  {
+    "location": "gate-1",
+    "ids": ["a25-76046946", "a01-1234567"]
+  },
+  {
+    "location": "gate-2",
+    "ids": []
+  }
+]
+```
+
+규칙:
+
+- 모든 location의 현재 인원 현황을 반환한다.
+- `board.html`은 이 응답을 사용한다.
 
 ---
 

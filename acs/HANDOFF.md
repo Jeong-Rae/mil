@@ -37,6 +37,14 @@
 - strict mode에서 누락 필드 접근이 500으로 튀는 문제를 수정함.
   - 서버 요청 필드는 안전한 helper로 읽도록 변경
   - 누락 필드 요청은 `400` + `{status:"rejected",message:"type, id, location are required"}` 로 응답함
+- `server.ps1`의 들여쓰기 깊이를 줄이기 위한 리팩터링을 추가로 적용함.
+  - `Send-RejectedResponse`, `Send-InternalServerError`로 에러 응답을 분리
+  - `New-AccessLogFile`, `New-AccessRecordLine`로 로그 초기화/레코드 문자열 생성을 분리
+  - `Test-AccessRecordRow`로 CSV replay 유효행 판정을 분리
+  - `Read-AccessPayload`, `Invoke-StatusRoute`, `Invoke-AccessRoute`, `Invoke-Request`를 추가해 `Invoke-ApiRoute`와 `Start-AcsServer`를 얇게 정리
+  - 한 줄로 충분한 guard/dispatch는 한 줄로 축약하고, 중첩 `try/if` 블록은 helper 함수로 이동
+- `GET /status`가 빈 배열일 때 `ConvertTo-Json -AsArray`가 `$null`을 반환해 500이 나는 문제를 수정함.
+  - `Send-JsonResponse`에서 빈 array 응답은 `[]`로 고정
 - `acs/SPEC.md`를 구현에 맞게 보정함.
   - 엔트리 파일을 `server.ps1`로 수정
   - 정적 파일 서빙 추가
@@ -47,6 +55,7 @@
   - 중앙 HTTP 서버 구현
   - 정적 파일 라우팅 + API 라우팅
   - CSV append + 메모리 상태 관리 + 재시작 복원
+  - request dispatch 및 에러 응답 helper로 들여쓰기 깊이 완화
 - `acs/index.html`
   - 스캐너 입력 화면
 - `acs/board.html`
@@ -76,6 +85,7 @@
   - `curl -sS http://127.0.0.1:8888/status?location=gate-1`
   - `curl -sS http://127.0.0.1:8888/status`
   - `curl -sS -X POST http://127.0.0.1:8888/access -H 'Content-Type: application/json' --data '{"id":"oops"}'`
+  - `pwsh` 파서 검사: `PARSE_OK`
 
 ## 2026-03-06
 

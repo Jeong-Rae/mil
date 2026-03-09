@@ -67,12 +67,41 @@ function Send-JsonResponse {
     )
 
     $json = if ($AsArray) {
-        $Payload | ConvertTo-Json -Compress -Depth 8 -AsArray
+        $value = $Payload | ConvertTo-Json -Compress -Depth 8 -AsArray
+        if ($null -eq $value) { "[]" } else { $value }
     } else {
         $Payload | ConvertTo-Json -Compress -Depth 8
     }
 
     Send-TextResponse -Response $Response -Text $json -ContentType "application/json; charset=utf-8" -StatusCode $StatusCode
+}
+
+function Send-RejectedResponse {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Net.HttpListenerResponse]$Response,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Message,
+
+        [int]$StatusCode = 400
+    )
+
+    Send-JsonResponse -Response $Response -Payload @{
+        status = "rejected"
+        message = $Message
+    } -StatusCode $StatusCode
+}
+
+function Send-InternalServerError {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Net.HttpListenerResponse]$Response
+    )
+
+    if ($Response.OutputStream.CanWrite) {
+        Send-RejectedResponse -Response $Response -Message "internal server error" -StatusCode 500
+    }
 }
 
 function Get-RequestBodyText {
@@ -108,6 +137,35 @@ function Get-StringField {
     return [string]$property.Value
 }
 
+function New-AccessLogFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$LogPath,
+
+        [Parameter(Mandatory = $true)]
+        [System.Text.Encoding]$Encoding
+    )
+
+    $dir = Split-Path -Parent $LogPath
+    if (-not [string]::IsNullOrWhiteSpace($dir) -and -not (Test-Path -LiteralPath $dir)) { [void](New-Item -ItemType Directory -Path $dir) }
+    if (-not (Test-Path -LiteralPath $LogPath)) { [System.IO.File]::WriteAllText($LogPath, "time,type,location,id`n", $Encoding) }
+}
+
+function New-AccessRecordLine {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Type,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Location,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Id
+    )
+
+    return ("{0},{1},{2},{3}" -f [DateTime]::UtcNow.ToString("o"), $Type, $Location, $Id)
+}
+
 function Add-AccessRecord {
     param(
         [Parameter(Mandatory = $true)]
@@ -123,19 +181,9 @@ function Add-AccessRecord {
         [string]$Id
     )
 
-    $dir = Split-Path -Parent $LogPath
-    if (-not [string]::IsNullOrWhiteSpace($dir) -and -not (Test-Path -LiteralPath $dir)) {
-        [void](New-Item -ItemType Directory -Path $dir)
-    }
-
-    $time = [DateTime]::UtcNow.ToString("o")
-    $line = "{0},{1},{2},{3}" -f $time, $Type, $Location, $Id
     $encoding = [System.Text.UTF8Encoding]::new($false)
-
-    if (-not (Test-Path -LiteralPath $LogPath)) {
-        [System.IO.File]::WriteAllText($LogPath, "time,type,location,id`n", $encoding)
-    }
-
+    $line = New-AccessRecordLine -Type $Type -Location $Location -Id $Id
+    New-AccessLogFile -LogPath $LogPath -Encoding $encoding
     [System.IO.File]::AppendAllText($LogPath, $line + [Environment]::NewLine, $encoding)
 }
 
@@ -237,12 +285,22 @@ function Import-CurrentStatus {
 
     $rows = Import-Csv -LiteralPath $LogPath
     foreach ($row in $rows) {
-        if ([string]::IsNullOrWhiteSpace([string]$row.type) -or [string]::IsNullOrWhiteSpace([string]$row.location) -or [string]::IsNullOrWhiteSpace([string]$row.id)) {
-            continue
-        }
-
+        if (-not (Test-AccessRecordRow -Row $row)) { continue }
         Set-CurrentStatus -State $State -Type ([string]$row.type) -Location ([string]$row.location) -Id ([string]$row.id)
     }
+}
+
+function Test-AccessRecordRow {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Row
+    )
+
+    return -not (
+        [string]::IsNullOrWhiteSpace([string]$Row.type) -or
+        [string]::IsNullOrWhiteSpace([string]$Row.location) -or
+        [string]::IsNullOrWhiteSpace([string]$Row.id)
+    )
 }
 
 function Invoke-StaticResourceRoute {
@@ -287,6 +345,87 @@ function Invoke-StaticResourceRoute {
     return $true
 }
 
+function Read-AccessPayload {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Net.HttpListenerRequest]$Request,
+
+        [Parameter(Mandatory = $true)]
+        [System.Net.HttpListenerResponse]$Response
+    )
+
+    try {
+        return (Get-RequestBodyText -Request $Request | ConvertFrom-Json)
+    } catch {
+        Send-RejectedResponse -Response $Response -Message "invalid json"
+        return $null
+    }
+}
+
+function Invoke-StatusRoute {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Net.HttpListenerResponse]$Response,
+
+        [Parameter(Mandatory = $true)]
+        [hashtable]$State,
+
+        [string]$Location
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Location)) {
+        Send-JsonResponse -Response $Response -Payload (Get-AllCurrentStatus -State $State) -AsArray
+        return $true
+    }
+
+    Send-JsonResponse -Response $Response -Payload (Get-CurrentStatus -State $State -Location $Location)
+    return $true
+}
+
+function Invoke-AccessRoute {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Net.HttpListenerRequest]$Request,
+
+        [Parameter(Mandatory = $true)]
+        [System.Net.HttpListenerResponse]$Response,
+
+        [Parameter(Mandatory = $true)]
+        [hashtable]$State,
+
+        [Parameter(Mandatory = $true)]
+        [string]$LogPath
+    )
+
+    $payload = Read-AccessPayload -Request $Request -Response $Response
+    if ($null -eq $payload) { return $true }
+
+    $type = Get-StringField -Object $payload -Name "type"
+    $location = Get-StringField -Object $payload -Name "location"
+    $id = Get-StringField -Object $payload -Name "id"
+
+    if ([string]::IsNullOrWhiteSpace($type) -or [string]::IsNullOrWhiteSpace($location) -or [string]::IsNullOrWhiteSpace($id)) {
+        Send-RejectedResponse -Response $Response -Message "type, id, location are required"
+        return $true
+    }
+
+    if ($type -ne "entry" -and $type -ne "exit") {
+        Send-RejectedResponse -Response $Response -Message "type must be entry or exit"
+        return $true
+    }
+
+    try {
+        Add-AccessRecord -LogPath $LogPath -Type $type -Location $location -Id $id
+        Set-CurrentStatus -State $State -Type $type -Location $location -Id $id
+    } catch {
+        Send-RejectedResponse -Response $Response -Message "failed to write access record" -StatusCode 500
+        return $true
+    }
+
+    Send-JsonResponse -Response $Response -Payload @{ status = "logged" }
+    return $true
+}
+
 function Invoke-ApiRoute {
     param(
         [Parameter(Mandatory = $true)]
@@ -304,69 +443,30 @@ function Invoke-ApiRoute {
     $path = $request.Url.AbsolutePath
     $method = $request.HttpMethod.ToUpperInvariant()
 
-    if ($method -eq "GET" -and $path -eq "/status") {
-        $location = [string]$request.QueryString["location"]
-        if ([string]::IsNullOrWhiteSpace($location)) {
-            Send-JsonResponse -Response $response -Payload (Get-AllCurrentStatus -State $State) -AsArray
-            return $true
-        }
-
-        Send-JsonResponse -Response $response -Payload (Get-CurrentStatus -State $State -Location $location)
-        return $true
-    }
-
-    if ($method -eq "POST" -and $path -eq "/access") {
-        $raw = Get-RequestBodyText -Request $request
-        $payload = $null
-
-        try {
-            $payload = $raw | ConvertFrom-Json
-        } catch {
-            Send-JsonResponse -Response $response -Payload @{
-                status = "rejected"
-                message = "invalid json"
-            } -StatusCode 400
-            return $true
-        }
-
-        $type = Get-StringField -Object $payload -Name "type"
-        $location = Get-StringField -Object $payload -Name "location"
-        $id = Get-StringField -Object $payload -Name "id"
-
-        if ([string]::IsNullOrWhiteSpace($type) -or [string]::IsNullOrWhiteSpace($location) -or [string]::IsNullOrWhiteSpace($id)) {
-            Send-JsonResponse -Response $response -Payload @{
-                status = "rejected"
-                message = "type, id, location are required"
-            } -StatusCode 400
-            return $true
-        }
-
-        if ($type -ne "entry" -and $type -ne "exit") {
-            Send-JsonResponse -Response $response -Payload @{
-                status = "rejected"
-                message = "type must be entry or exit"
-            } -StatusCode 400
-            return $true
-        }
-
-        try {
-            Add-AccessRecord -LogPath $LogPath -Type $type -Location $location -Id $id
-            Set-CurrentStatus -State $State -Type $type -Location $location -Id $id
-        } catch {
-            Send-JsonResponse -Response $response -Payload @{
-                status = "rejected"
-                message = "failed to write access record"
-            } -StatusCode 500
-            return $true
-        }
-
-        Send-JsonResponse -Response $response -Payload @{
-            status = "logged"
-        }
-        return $true
-    }
+    if ($method -eq "GET" -and $path -eq "/status") { return (Invoke-StatusRoute -Response $response -State $State -Location ([string]$request.QueryString["location"])) }
+    if ($method -eq "POST" -and $path -eq "/access") { return (Invoke-AccessRoute -Request $request -Response $response -State $State -LogPath $LogPath) }
 
     return $false
+}
+
+function Invoke-Request {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Net.HttpListenerContext]$Context,
+
+        [Parameter(Mandatory = $true)]
+        [string]$AppRoot,
+
+        [Parameter(Mandatory = $true)]
+        [hashtable]$State,
+
+        [Parameter(Mandatory = $true)]
+        [string]$LogPath
+    )
+
+    if (Invoke-StaticResourceRoute -Context $Context -AppRoot $AppRoot) { return }
+    if (Invoke-ApiRoute -Context $Context -State $State -LogPath $LogPath) { return }
+    Send-TextResponse -Response $Context.Response -Text "Not Found" -StatusCode 404
 }
 
 function Start-AcsServer {
@@ -393,25 +493,11 @@ function Start-AcsServer {
 
         while ($listener.IsListening) {
             $context = $listener.GetContext()
-            $response = $context.Response
 
             try {
-                if (Invoke-StaticResourceRoute -Context $context -AppRoot $appRoot) {
-                    continue
-                }
-
-                if (Invoke-ApiRoute -Context $context -State $state -LogPath $logPath) {
-                    continue
-                }
-
-                Send-TextResponse -Response $response -Text "Not Found" -StatusCode 404
+                Invoke-Request -Context $context -AppRoot $appRoot -State $state -LogPath $logPath
             } catch {
-                if ($response.OutputStream.CanWrite) {
-                    Send-JsonResponse -Response $response -Payload @{
-                        status = "rejected"
-                        message = "internal server error"
-                    } -StatusCode 500
-                }
+                Send-InternalServerError -Response $context.Response
             }
         }
     } finally {

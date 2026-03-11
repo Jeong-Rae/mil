@@ -3,6 +3,19 @@
 ## 2026-03-11
 
 ### 작업 요약
+- `acs/server.ps1`에 `GET /logs` 일별 로그 조회 API를 추가함.
+  - query `day=YYYY-MM-DD`를 선택적으로 받음
+  - 값이 없으면 현재 KST 날짜를 기본값으로 사용함
+  - CSV에서 해당 KST 날짜의 `time,type,location,id` 전체 로그만 추려 배열로 반환함
+  - 잘못된 날짜 형식은 `400` + `{status:"rejected",message:"day must be yyyy-mm-dd"}`로 거부함
+- `acs/board.html`, `acs/script.js`, `acs/style.css`를 확장해 한 페이지 전환형 현황판을 구현함.
+  - `현황 보기` / `로그 보기` 전환 버튼 추가
+  - 로그 보기에는 날짜 입력, 군번/위치 통합 검색, 최신순/오래된순 정렬 추가
+  - 로그 검색과 정렬은 FE에서만 수행하고, 서버는 해당 날짜 전체 로그만 반환함
+  - 기존 현황판 polling 구조는 유지하되 현재 활성 뷰에 맞는 API를 주기적으로 다시 조회함
+- `acs/SPEC.md`를 현재 구현 기준으로 보정함.
+  - `GET /logs` 계약과 KST 날짜 기준을 명시
+  - 현황판 로그 뷰가 FE 필터/정렬을 수행한다는 점을 반영
 - `acs/script.js`의 스캐너 입력 흐름에서 `form submit` 경로를 제거함.
   - `submit` listener를 제거함
   - Enter 입력과 CR/LF 입력 핸들러가 `requestSubmit()` 대신 `submitAccess()`를 직접 호출함
@@ -20,6 +33,11 @@
   - 보드 polling 및 수동 새로고침 유지
 
 ### 다음 세션 인계 포인트
+- 로그 조회 API는 `GET /logs` 한 개만 추가되었고, 기존 `POST /access`와 `GET /status` 계약은 바꾸지 않았다.
+- 로그 날짜 기준은 서버/클라이언트 모두 KST 고정이다.
+- 로그 응답은 원본 CSV 컬럼인 `time,type,location,id`만 포함한다.
+- `board.html`은 별도 로그 페이지를 만들지 않고, 같은 페이지 안에서 상태/로그 뷰를 전환한다.
+- 로그 검색과 정렬은 서버가 아니라 `acs/script.js`에서 수행한다.
 - 현재 스캐너 페이지는 `form` 엘리먼트를 마크업으로는 유지하지만, 요청 전송은 더 이상 submit 이벤트에 의존하지 않는다.
 - 바코드 입력에서 Enter 또는 줄바꿈이 들어오면 클라이언트 핸들러가 즉시 `postAccess()`를 호출한다.
 - 이번 변경은 프론트 JS 구조 정리와 요청 트리거 변경만 포함하며, 서버 API나 HTML 구조는 바꾸지 않았다.

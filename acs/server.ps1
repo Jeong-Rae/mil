@@ -205,6 +205,102 @@ function Add-AccessRecord {
     [System.IO.File]::AppendAllText($LogPath, $line + [Environment]::NewLine, $encoding)
 }
 
+function Get-KstDateString {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.DateTimeOffset]$Value
+    )
+
+    return $Value.ToOffset([System.TimeSpan]::FromHours(9)).ToString("yyyy-MM-dd")
+}
+
+function Get-CurrentKstDateString {
+    return (Get-KstDateString -Value [System.DateTimeOffset]::UtcNow)
+}
+
+function Test-LogDay {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Day
+    )
+
+    $value = [datetime]::MinValue
+    return [datetime]::TryParseExact(
+        $Day,
+        "yyyy-MM-dd",
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [System.Globalization.DateTimeStyles]::None,
+        [ref]$value
+    )
+}
+
+function ConvertTo-AccessLogRecord {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Row
+    )
+
+    if (-not (Test-AccessRecordRow -Row $Row)) {
+        return $null
+    }
+
+    $timeText = [string]$Row.time
+    if ([string]::IsNullOrWhiteSpace($timeText)) {
+        return $null
+    }
+
+    try {
+        $time = [System.DateTimeOffset]::Parse(
+            $timeText,
+            [System.Globalization.CultureInfo]::InvariantCulture,
+            [System.Globalization.DateTimeStyles]::RoundtripKind
+        )
+    } catch {
+        return $null
+    }
+
+    return [pscustomobject]@{
+        time = $timeText
+        type = [string]$Row.type
+        location = [string]$Row.location
+        id = [string]$Row.id
+        kstDay = Get-KstDateString -Value $time
+    }
+}
+
+function Get-AccessLogsByDay {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$LogPath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Day
+    )
+
+    if (-not (Test-Path -LiteralPath $LogPath)) {
+        return @()
+    }
+
+    $items = New-Object System.Collections.ArrayList
+    $rows = Import-Csv -LiteralPath $LogPath
+
+    foreach ($row in $rows) {
+        $record = ConvertTo-AccessLogRecord -Row $row
+        if ($null -eq $record -or $record.kstDay -ne $Day) {
+            continue
+        }
+
+        [void]$items.Add([pscustomobject]@{
+            time = $record.time
+            type = $record.type
+            location = $record.location
+            id = $record.id
+        })
+    }
+
+    return @($items)
+}
+
 function Set-CurrentStatus {
     param(
         [Parameter(Mandatory = $true)]
@@ -399,11 +495,39 @@ function Invoke-StatusRoute {
     )
 
     if ([string]::IsNullOrWhiteSpace($Location)) {
-        Send-JsonResponse -Response $Response -Payload (Get-AllCurrentStatus -State $State) -AsArray
+        $items = @(Get-AllCurrentStatus -State $State)
+        Send-JsonResponse -Response $Response -Payload $items -AsArray
         return $true
     }
 
     Send-JsonResponse -Response $Response -Payload (Get-CurrentStatus -State $State -Location $Location)
+    return $true
+}
+
+function Invoke-LogsRoute {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Net.HttpListenerRequest]$Request,
+
+        [Parameter(Mandatory = $true)]
+        [System.Net.HttpListenerResponse]$Response,
+
+        [Parameter(Mandatory = $true)]
+        [string]$LogPath
+    )
+
+    $day = [string]$Request.QueryString["day"]
+    if ([string]::IsNullOrWhiteSpace($day)) {
+        $day = Get-CurrentKstDateString
+    }
+
+    if (-not (Test-LogDay -Day $day)) {
+        Send-RejectedResponse -Response $Response -Message "day must be yyyy-mm-dd"
+        return $true
+    }
+
+    $items = @(Get-AccessLogsByDay -LogPath $LogPath -Day $day)
+    Send-JsonResponse -Response $Response -Payload $items -AsArray
     return $true
 }
 
@@ -480,6 +604,7 @@ function Invoke-ApiRoute {
     $method = $request.HttpMethod.ToUpperInvariant()
 
     if ($method -eq "GET" -and $path -eq "/status") { return (Invoke-StatusRoute -Response $response -State $State -Location ([string]$request.QueryString["location"])) }
+    if ($method -eq "GET" -and $path -eq "/logs") { return (Invoke-LogsRoute -Request $request -Response $response -LogPath $LogPath) }
     if ($method -eq "POST" -and $path -eq "/access") { return (Invoke-AccessRoute -Request $request -Response $response -State $State -LogPath $LogPath -AllowedIds $AllowedIds) }
 
     return $false

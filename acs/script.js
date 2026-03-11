@@ -1,9 +1,12 @@
 const DUPLICATE_WINDOW_MS = 15000;
 const BOARD_POLL_MS = 5000;
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
 const $ = id => document.getElementById(id);
 
 let boardTimerId = null;
+let activeBoardView = "status";
+let boardLogs = [];
 const recentScans = {};
 
 const fetchJson = async (url, options) => {
@@ -76,6 +79,7 @@ const markRecentScan = (location, rawBarcode) => {
 };
 
 const fetchAllStatus = () => fetchJson("/status");
+const fetchLogs = day => fetchJson(`/logs?day=${encodeURIComponent(day)}`);
 
 const postAccess = payload =>
   fetchJson("/access", {
@@ -93,6 +97,34 @@ const createElement = (tagName, className, text) => {
   if (typeof text !== "undefined") el.textContent = text;
 
   return el;
+};
+
+const padNumber = value => String(value).padStart(2, "0");
+
+const toKstDate = value => new Date(new Date(value).getTime() + KST_OFFSET_MS);
+
+const getCurrentKstDay = () => {
+  const now = new Date(Date.now() + KST_OFFSET_MS);
+  const year = now.getUTCFullYear();
+  const month = padNumber(now.getUTCMonth() + 1);
+  const day = padNumber(now.getUTCDate());
+
+  return `${year}-${month}-${day}`;
+};
+
+const formatLogTime = value => {
+  const date = toKstDate(value);
+
+  if (Number.isNaN(date.getTime())) return String(value || "-");
+
+  const year = date.getUTCFullYear();
+  const month = padNumber(date.getUTCMonth() + 1);
+  const day = padNumber(date.getUTCDate());
+  const hour = padNumber(date.getUTCHours());
+  const minute = padNumber(date.getUTCMinutes());
+  const second = padNumber(date.getUTCSeconds());
+
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
 };
 
 const clearInput = input => {
@@ -160,6 +192,51 @@ const renderBoard = groups => {
   root.replaceChildren(frag);
 };
 
+const renderLogs = () => {
+  const body = $("log-table-body");
+  if (!body) return;
+
+  const query = $("log-search-input")?.value.trim().toLowerCase() || "";
+  const order = $("log-sort-select")?.value || "desc";
+  const items = boardLogs
+    .filter(item => {
+      if (!query) return true;
+
+      const id = String(item?.id || "").toLowerCase();
+      const location = String(item?.location || "").toLowerCase();
+      return id.includes(query) || location.includes(query);
+    })
+    .sort((left, right) => {
+      const diff = String(left?.time || "").localeCompare(String(right?.time || ""));
+      return order === "asc" ? diff : diff * -1;
+    });
+
+  const frag = document.createDocumentFragment();
+
+  if (items.length === 0) {
+    const row = createElement("tr");
+    const cell = createElement("td", "empty-cell", "로그가 없습니다.");
+
+    cell.colSpan = 4;
+    row.appendChild(cell);
+    frag.appendChild(row);
+    body.replaceChildren(frag);
+    return;
+  }
+
+  for (const item of items) {
+    const row = createElement("tr");
+
+    row.appendChild(createElement("td", "", formatLogTime(item?.time)));
+    row.appendChild(createElement("td", "", item?.type === "entry" ? "입영" : "퇴영"));
+    row.appendChild(createElement("td", "", String(item?.location || "-")));
+    row.appendChild(createElement("td", "", String(item?.id || "-")));
+    frag.appendChild(row);
+  }
+
+  body.replaceChildren(frag);
+};
+
 const refreshBoard = async () => {
   const root = $("board-groups");
   if (!root) return;
@@ -178,6 +255,47 @@ const refreshBoard = async () => {
   }
 };
 
+const refreshLogs = async () => {
+  const body = $("log-table-body");
+  if (!body) return;
+
+  const status = $("board-status");
+  const updated = $("board-updated");
+  const dayInput = $("log-day-input");
+  const day = dayInput?.value || getCurrentKstDay();
+
+  try {
+    const data = await fetchLogs(day);
+
+    boardLogs = Array.isArray(data) ? data : [];
+    renderLogs();
+    if (status) status.textContent = "정상";
+    if (updated) updated.textContent = new Date().toLocaleString();
+  } catch {
+    if (status) status.textContent = "실패";
+  }
+};
+
+const refreshActiveBoardView = () => {
+  if (activeBoardView === "logs") return refreshLogs();
+  return refreshBoard();
+};
+
+const setBoardView = view => {
+  activeBoardView = view === "logs" ? "logs" : "status";
+
+  const statusView = $("board-status-view");
+  const logsView = $("board-logs-view");
+  const statusButton = $("show-status-view-button");
+  const logsButton = $("show-logs-view-button");
+  const isLogsView = activeBoardView === "logs";
+
+  if (statusView) statusView.hidden = isLogsView;
+  if (logsView) logsView.hidden = !isLogsView;
+  if (statusButton) statusButton.classList.toggle("is-active", !isLogsView);
+  if (logsButton) logsButton.classList.toggle("is-active", isLogsView);
+};
+
 const startBoardPolling = () => {
   const root = $("board-groups");
   if (!root) return;
@@ -185,7 +303,7 @@ const startBoardPolling = () => {
   if (boardTimerId !== null) clearInterval(boardTimerId);
 
   boardTimerId = window.setInterval(() => {
-    void refreshBoard();
+    void refreshActiveBoardView();
   }, BOARD_POLL_MS);
 };
 
@@ -259,11 +377,31 @@ const initScannerPage = () => {
 const initBoardPage = () => {
   const root = $("board-groups");
   const button = $("refresh-board-button");
+  const statusButton = $("show-status-view-button");
+  const logsButton = $("show-logs-view-button");
+  const dayInput = $("log-day-input");
+  const searchInput = $("log-search-input");
+  const sortInput = $("log-sort-select");
+
   if (!root) return;
 
-  if (button) button.addEventListener("click", () => void refreshBoard());
+  if (dayInput && !dayInput.value) dayInput.value = getCurrentKstDay();
 
-  void refreshBoard();
+  if (button) button.addEventListener("click", () => void refreshActiveBoardView());
+  if (statusButton) statusButton.addEventListener("click", () => {
+    setBoardView("status");
+    void refreshActiveBoardView();
+  });
+  if (logsButton) logsButton.addEventListener("click", () => {
+    setBoardView("logs");
+    void refreshActiveBoardView();
+  });
+  if (dayInput) dayInput.addEventListener("change", () => void refreshLogs());
+  if (searchInput) searchInput.addEventListener("input", () => renderLogs());
+  if (sortInput) sortInput.addEventListener("change", () => renderLogs());
+
+  setBoardView("status");
+  void refreshActiveBoardView();
   startBoardPolling();
 };
 

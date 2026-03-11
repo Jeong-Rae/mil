@@ -81,7 +81,8 @@ body {
 
 .panel,
 .board-meta,
-.board-card {
+.board-card,
+.log-table-shell {
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--panel);
@@ -115,7 +116,23 @@ body {
   background: var(--panel-strong);
 }
 
+.field select {
+  width: 100%;
+  min-height: 56px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 20px;
+  color: var(--ink);
+  background: var(--panel-strong);
+}
+
 .field input:focus {
+  outline: 3px solid rgba(24, 75, 150, 0.18);
+  border-color: var(--accent);
+}
+
+.field select:focus {
   outline: 3px solid rgba(24, 75, 150, 0.18);
   border-color: var(--accent);
 }
@@ -168,6 +185,37 @@ body {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.board-switch {
+  display: inline-flex;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: var(--shadow);
+}
+
+.switch-button {
+  min-height: 42px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--soft);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.switch-button.is-active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.board-view[hidden] {
+  display: none;
+}
+
 .board-card {
   padding: 16px;
   background: rgba(255, 255, 255, 0.98);
@@ -199,6 +247,53 @@ body {
   background: rgba(255, 255, 255, 0.72);
 }
 
+.log-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.log-field {
+  font-size: 15px;
+}
+
+.log-table-shell {
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.log-table-wrap {
+  overflow-x: auto;
+}
+
+.log-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.log-table th,
+.log-table td {
+  padding: 14px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.log-table th {
+  font-size: 15px;
+  color: var(--soft);
+}
+
+.log-table td {
+  font-size: 17px;
+}
+
+.empty-cell {
+  text-align: center !important;
+  color: var(--soft);
+}
+
 @media (max-width: 640px) {
   .page {
     padding: 16px;
@@ -222,7 +317,23 @@ body {
     font-size: 24px;
   }
 
+  .board-switch {
+    width: 100%;
+  }
+
+  .switch-button {
+    flex: 1 1 0;
+  }
+
+  .log-controls {
+    grid-template-columns: 1fr;
+  }
+
   .field input {
     font-size: 20px;
+  }
+
+  .field select {
+    font-size: 18px;
   }
 }

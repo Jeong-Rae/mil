@@ -3,6 +3,20 @@
 ## 2026-03-11
 
 ### 작업 요약
+- `acs/board.html`, `acs/script.js`에서 현황판 기본 진입 뷰를 `현황 보기`에서 `로그 보기`로 변경함.
+  - 초기 활성 전환 버튼을 `로그 보기`로 바꿈
+  - 초기 hidden 상태를 로그 테이블 기준으로 맞춤
+  - 보드 페이지 초기화 시 첫 조회 API가 `/status`가 아니라 `/logs`가 되도록 조정함
+
+### 다음 세션 인계 포인트
+- `board.html` 기본 진입 화면은 이제 로그 뷰다.
+- 상태 카드는 여전히 같은 페이지에 남아 있으며, `현황 보기` 버튼으로 즉시 전환된다.
+- polling 구조는 유지되고, 최초 진입 시점과 현재 활성 뷰 기준만 로그 쪽으로 바뀌었다.
+
+### 검증 내역
+- `node --check /workspaces/mil/acs/script.js`
+
+### 작업 요약
 - `acs/server.ps1`의 현재 상태 갱신 로직을 수정함.
   - 기존에는 `Set-CurrentStatus`가 `entry`/`exit`를 구분하지 않고 항상 해당 location에 `id`를 다시 넣었음
   - 이제는 모든 location에서 해당 `id`를 먼저 제거하고, `type`이 `entry`일 때만 요청 location에 다시 추가함

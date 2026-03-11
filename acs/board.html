@@ -24,11 +24,11 @@
     </section>
 
     <section class="board-switch" aria-label="현황판 보기 전환">
-      <button id="show-status-view-button" class="switch-button is-active" type="button">현황 보기</button>
-      <button id="show-logs-view-button" class="switch-button" type="button">로그 보기</button>
+      <button id="show-status-view-button" class="switch-button" type="button">현황 보기</button>
+      <button id="show-logs-view-button" class="switch-button is-active" type="button">로그 보기</button>
     </section>
 
-    <section id="board-status-view" class="board-view" aria-live="polite">
+    <section id="board-status-view" class="board-view" aria-live="polite" hidden>
       <section id="board-groups" class="board-groups">
         <article class="board-card empty-card">
           <h2>현황 없음</h2>
@@ -37,7 +37,7 @@
       </section>
     </section>
 
-    <section id="board-logs-view" class="board-view" hidden>
+    <section id="board-logs-view" class="board-view">
       <section class="panel log-controls">
         <label class="field log-field">
           <span>날짜</span>

@@ -5,7 +5,7 @@ const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const $ = id => document.getElementById(id);
 
 let boardTimerId = null;
-let activeBoardView = "status";
+let activeBoardView = "logs";
 let boardLogs = [];
 let scannerLocation = "";
 let configuredLocations = [];
@@ -543,7 +543,7 @@ const initBoardPage = () => {
   if (searchInput) searchInput.addEventListener("input", () => renderLogs());
   if (sortInput) sortInput.addEventListener("change", () => renderLogs());
 
-  setBoardView("status");
+  setBoardView("logs");
   void refreshActiveBoardView();
   startBoardPolling();
 };

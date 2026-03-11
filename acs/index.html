@@ -17,15 +17,25 @@
 
     <section class="panel">
       <section id="location-select-panel" class="location-select-panel">
-        <label class="field">
-          <span>스캐너 위치 선택</span>
-          <select id="location-select">
-            <option value="">위치를 선택해 주세요</option>
-          </select>
-        </label>
-
-        <button id="select-location-button" class="primary-button" type="button">스캐너 시작</button>
+        <p>스캐너에 들어가기 전에 위치를 선택해 주세요.</p>
+        <button id="choose-location-button" class="primary-button" type="button">위치 선택</button>
       </section>
+
+      <dialog id="location-dialog" class="location-dialog">
+        <form id="location-dialog-form" class="location-dialog-form" method="dialog">
+          <h2>스캐너 위치 선택</h2>
+          <label class="field" for="location-select">
+            <span>위치</span>
+            <select id="location-select">
+              <option value="">위치를 선택해 주세요</option>
+            </select>
+          </label>
+          <div class="location-dialog-actions">
+            <button id="cancel-location-button" class="link-button" type="button">취소</button>
+            <button id="select-location-button" class="primary-button" type="submit">선택 완료</button>
+          </div>
+        </form>
+      </dialog>
 
       <section id="scanner-panel" hidden>
         <div class="selected-location">

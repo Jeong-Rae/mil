@@ -3,6 +3,30 @@
 ## 2026-03-11
 
 ### 작업 요약
+- `acs/index.html`, `acs/script.js`, `acs/style.css`의 스캐너 진입 방식을 입력형 `prompt`에서 `select` 기반 모달로 변경함.
+  - 진입 시 `/locations` 후보 목록을 채운 모달을 자동으로 열어 location을 선택하게 함
+  - 선택 UI는 브라우저 입력창이 아니라 `select` 드롭다운만 사용함
+  - 선택 완료 전에는 기존처럼 스캐너 패널에 진입하지 않음
+  - 취소하거나 모달을 닫은 경우에는 스캐너 진입을 막고, 페이지의 `위치 선택` 버튼으로 다시 열 수 있게 함
+- 기존 바코드 처리 흐름은 유지함.
+  - 선택된 location은 세션 동안 고정되어 `POST /access`에 포함됨
+  - 선택 후 바코드 입력 포커스 유지, 중복 스캔 억제, 결과 메시지 표시는 그대로 유지함
+
+### 다음 세션 인계 포인트
+- 현재 스캐너 진입 UX는 `dialog` + `select` 기반 모달이다.
+- location 선택 실패나 취소 시 `location-select-panel`은 남아 있고, `위치 선택` 버튼으로 모달을 다시 열 수 있다.
+- location 후보는 항상 `GET /locations` 응답으로 `select`에 다시 채운다.
+
+### 검증 내역
+- `node --check /workspaces/mil/acs/script.js`
+- `curl -sS http://127.0.0.1:8888/`
+  - 위치 선택용 `dialog`, `select`, `선택 완료` 버튼이 정적 HTML에 포함되는 것 확인
+- `curl -sS http://127.0.0.1:8888/script.js`
+  - `populateLocationSelect`, `openLocationDialog`, `dialogForm` submit 처리 코드가 서빙되는 것 확인
+- `curl -sS http://127.0.0.1:8888/locations`
+  - location 후보 응답 확인
+
+### 작업 요약
 - `acs/location.json`을 추가하고, 서버가 시작 시 location 후보 배열을 읽도록 확장함.
   - 구조는 `[{"location":"gate-1"}]` 고정
   - `acs/server.ps1`에 `GET /locations`를 추가해 이 배열을 그대로 반환함

@@ -193,7 +193,30 @@ const populateLocationSelect = items => {
   }
 
   select.replaceChildren(frag);
-  select.value = "";
+  select.value = scannerLocation && isConfiguredLocation(scannerLocation) ? scannerLocation : "";
+};
+
+const closeLocationDialog = () => {
+  const dialog = $("location-dialog");
+  if (dialog?.open) dialog.close();
+};
+
+const openLocationDialog = () => {
+  if (configuredLocations.length === 0) {
+    showMessage("선택할 location이 없습니다.", "error");
+    return false;
+  }
+
+  const dialog = $("location-dialog");
+  const select = $("location-select");
+  if (!dialog || !select) return false;
+
+  populateLocationSelect(configuredLocations);
+  dialog.showModal();
+  window.setTimeout(() => {
+    select.focus();
+  }, 0);
+  return true;
 };
 
 const activateScannerLocation = location => {
@@ -411,10 +434,13 @@ const submitAccess = async () => {
 
 const initScannerPage = async () => {
   const input = $("barcode-input");
+  const button = $("choose-location-button");
+  const dialog = $("location-dialog");
+  const dialogForm = $("location-dialog-form");
   const select = $("location-select");
-  const button = $("select-location-button");
+  const cancelButton = $("cancel-location-button");
 
-  if (!input || !select || !button) return;
+  if (!input || !button || !dialog || !dialogForm || !select || !cancelButton) return;
 
   input.addEventListener("keydown", event => {
     if (event.key !== "Enter") return;
@@ -435,22 +461,32 @@ const initScannerPage = async () => {
   });
 
   button.addEventListener("click", () => {
-    const location = select.value.trim();
+    openLocationDialog();
+  });
 
+  dialogForm.addEventListener("submit", event => {
+    event.preventDefault();
+
+    const location = select.value.trim();
     if (!location) {
       showMessage("위치를 선택해 주세요.", "error");
       select.focus();
       return;
     }
 
+    dialog.returnValue = "selected";
+    closeLocationDialog();
     activateScannerLocation(location);
   });
 
-  select.addEventListener("keydown", event => {
-    if (event.key !== "Enter") return;
+  cancelButton.addEventListener("click", () => {
+    closeLocationDialog();
+    showMessage("위치 선택이 취소되었습니다.", "error");
+  });
 
-    event.preventDefault();
-    button.click();
+  dialog.addEventListener("close", () => {
+    if (scannerLocation || dialog.returnValue === "selected") return;
+    showMessage("위치 선택이 취소되었습니다.", "error");
   });
 
   document.addEventListener("click", event => {
@@ -469,16 +505,15 @@ const initScannerPage = async () => {
     if (configuredLocations.length === 0) {
       showMessage("선택할 location이 없습니다.", "error");
       button.disabled = true;
-      select.disabled = true;
       return;
     }
 
     showMessage("위치를 선택해 주세요.", null);
-    select.focus();
+    button.focus();
+    openLocationDialog();
   } catch (err) {
     showMessage(err.message || "location 목록을 불러오지 못했습니다.", "error");
     button.disabled = true;
-    select.disabled = true;
   }
 };
 

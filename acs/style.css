@@ -123,6 +123,41 @@ body {
   gap: 16px;
 }
 
+.location-dialog {
+  width: min(100%, 420px);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.location-dialog::backdrop {
+  background: rgba(16, 35, 63, 0.32);
+}
+
+.location-dialog-form {
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+}
+
+.location-dialog-form h2 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.location-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.location-dialog-actions .link-button {
+  background: #f2f6fc;
+  color: var(--accent-strong);
+}
+
 .selected-location {
   display: flex;
   align-items: center;

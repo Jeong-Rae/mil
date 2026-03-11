@@ -3,6 +3,24 @@
 ## 2026-03-11
 
 ### 작업 요약
+- `acs/location.json`을 추가하고, 서버가 시작 시 location 후보 배열을 읽도록 확장함.
+  - 구조는 `[{"location":"gate-1"}]` 고정
+  - `acs/server.ps1`에 `GET /locations`를 추가해 이 배열을 그대로 반환함
+- `acs/index.html`, `acs/script.js`, `acs/style.css`를 수정해 스캐너 진입 시 location을 먼저 선택하도록 변경함.
+  - 자유 입력 `location` 필드를 제거함
+  - `/locations` 응답으로 select 후보를 채움
+  - location 선택 전에는 바코드 스캔을 시작하지 않음
+  - 선택 후에는 해당 location을 고정값으로 사용해 `POST /access`를 보냄
+- `acs/script.js`의 현황판 렌더링을 `location.json` 기준 노출 구조로 조정함.
+  - `/status` 전체 응답을 받더라도 `location.json`에 있는 location 카드만 그림
+  - 등록된 location인데 현재 상태가 없으면 빈 카드로 유지함
+  - `/logs` 응답에서도 `location.json`에 없는 location row는 화면에서 숨김
+- 서버 호환성 동작은 유지함.
+  - `POST /access`는 `location.json`에 없는 location도 계속 허용함
+  - 미등록 location 데이터는 로그와 상태 계산에는 남지만 UI에만 표시하지 않음
+- `acs/SPEC.md`를 현재 계약에 맞게 보정함.
+  - `location.json` 관리와 `GET /locations` API를 추가
+  - 스캐너 선택 흐름과 현황판 노출 정책을 문서화함
 - `acs/server.ps1`에 `GET /logs` 일별 로그 조회 API를 추가함.
   - query `day=YYYY-MM-DD`를 선택적으로 받음
   - 값이 없으면 현재 KST 날짜를 기본값으로 사용함
@@ -33,6 +51,11 @@
   - 보드 polling 및 수동 새로고침 유지
 
 ### 다음 세션 인계 포인트
+- location 후보의 기준 데이터는 `acs/location.json` 한 곳이다.
+- 서버는 시작 시 `location.json`을 1회 로드하고, `GET /locations`는 그 메모리 값을 그대로 반환한다.
+- 스캐너는 이제 자유 입력이 아니라 진입 직후 location 선택 후에만 동작한다.
+- 현황판은 admin용 전체 화면을 유지하지만, 카드와 로그 표시는 `location.json`에 등록된 location만 노출한다.
+- 구버전/직접 호출 클라이언트가 미등록 location으로 `POST /access`를 보내도 서버는 계속 `logged` 처리한다.
 - 로그 조회 API는 `GET /logs` 한 개만 추가되었고, 기존 `POST /access`와 `GET /status` 계약은 바꾸지 않았다.
 - 로그 날짜 기준은 서버/클라이언트 모두 KST 고정이다.
 - 로그 응답은 원본 CSV 컬럼인 `time,type,location,id`만 포함한다.
@@ -41,6 +64,18 @@
 - 현재 스캐너 페이지는 `form` 엘리먼트를 마크업으로는 유지하지만, 요청 전송은 더 이상 submit 이벤트에 의존하지 않는다.
 - 바코드 입력에서 Enter 또는 줄바꿈이 들어오면 클라이언트 핸들러가 즉시 `postAccess()`를 호출한다.
 - 이번 변경은 프론트 JS 구조 정리와 요청 트리거 변경만 포함하며, 서버 API나 HTML 구조는 바꾸지 않았다.
+
+### 검증 내역
+- 실제 서버 실행 후 아래 API를 직접 호출해 확인함.
+  - `GET /locations` 반환 확인
+  - 등록 location `POST /access` 성공 확인
+  - 미등록 location `POST /access`도 성공 확인
+  - `GET /status`
+  - `GET /status?location=gate-2`
+  - `GET /status?location=legacy-gate-2`
+  - `GET /logs?day=2026-03-11`
+  - 잘못된 `day`로 `GET /logs?day=2026-13-99` 호출 시 `400` 거부 확인
+- 검증 중 append된 테스트 로그 4건은 `acs/logs/access-log.csv`에서 제거해 작업 산출물에 남기지 않음.
 
 ## 2026-03-09
 

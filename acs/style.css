@@ -73,6 +73,26 @@ body {
   box-shadow: none;
 }
 
+.primary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primary-button:disabled {
+  background: #8fa4c5;
+  cursor: default;
+}
+
 .topbar .link-button {
   border-color: rgba(255, 255, 255, 0.28);
   background: transparent;
@@ -96,6 +116,31 @@ body {
 .scan-form {
   display: grid;
   gap: 16px;
+}
+
+.location-select-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.selected-location {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f7faff;
+}
+
+.selected-location-label {
+  color: var(--soft);
+  font-weight: 600;
+}
+
+.selected-location strong {
+  font-size: 22px;
 }
 
 .field {
@@ -335,5 +380,10 @@ body {
 
   .field select {
     font-size: 18px;
+  }
+
+  .selected-location {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

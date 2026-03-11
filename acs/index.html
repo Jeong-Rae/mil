@@ -16,21 +16,34 @@
     </header>
 
     <section class="panel">
-      <form id="scan-form" class="scan-form">
+      <section id="location-select-panel" class="location-select-panel">
         <label class="field">
-          <span>위치</span>
-          <input id="location-input" type="text" autocomplete="off" placeholder="gate-1">
+          <span>스캐너 위치 선택</span>
+          <select id="location-select">
+            <option value="">위치를 선택해 주세요</option>
+          </select>
         </label>
 
-        <label class="field">
-          <span>바코드</span>
-          <input id="barcode-input" type="text" autocomplete="off" placeholder="ENa25-76046946">
-        </label>
-      </form>
+        <button id="select-location-button" class="primary-button" type="button">스캐너 시작</button>
+      </section>
+
+      <section id="scanner-panel" hidden>
+        <div class="selected-location">
+          <span class="selected-location-label">선택 위치</span>
+          <strong id="selected-location-text">-</strong>
+        </div>
+
+        <form id="scan-form" class="scan-form">
+          <label class="field">
+            <span>바코드</span>
+            <input id="barcode-input" type="text" autocomplete="off" placeholder="ENa25-76046946">
+          </label>
+        </form>
+      </section>
 
       <section class="message-panel" aria-live="polite">
         <div class="message-label">처리 결과</div>
-        <div id="message-text" class="message-text">대기 중</div>
+        <div id="message-text" class="message-text">위치를 선택해 주세요.</div>
       </section>
     </section>
   </main>

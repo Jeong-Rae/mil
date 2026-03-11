@@ -155,6 +155,26 @@ function Import-AllowedIds {
     return $allowedIds
 }
 
+function Import-Locations {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$LocationPath
+    )
+
+    $items = Get-Content -LiteralPath $LocationPath -Raw | ConvertFrom-Json
+    $locations = New-Object System.Collections.ArrayList
+
+    foreach ($item in @($items)) {
+        $location = Get-StringField -Object $item -Name "location"
+        if ([string]::IsNullOrWhiteSpace($location)) { continue }
+        [void]$locations.Add([pscustomobject]@{
+            location = $location
+        })
+    }
+
+    return @($locations)
+}
+
 function New-AccessLogFile {
     param(
         [Parameter(Mandatory = $true)]
@@ -531,6 +551,19 @@ function Invoke-LogsRoute {
     return $true
 }
 
+function Invoke-LocationsRoute {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Net.HttpListenerResponse]$Response,
+
+        [Parameter(Mandatory = $true)]
+        [object[]]$Locations
+    )
+
+    Send-JsonResponse -Response $Response -Payload @($Locations) -AsArray
+    return $true
+}
+ 
 function Invoke-AccessRoute {
     param(
         [Parameter(Mandatory = $true)]
@@ -595,7 +628,10 @@ function Invoke-ApiRoute {
         [string]$LogPath,
 
         [Parameter(Mandatory = $true)]
-        [hashtable]$AllowedIds
+        [hashtable]$AllowedIds,
+
+        [Parameter(Mandatory = $true)]
+        [object[]]$Locations
     )
 
     $request = $Context.Request
@@ -604,6 +640,7 @@ function Invoke-ApiRoute {
     $method = $request.HttpMethod.ToUpperInvariant()
 
     if ($method -eq "GET" -and $path -eq "/status") { return (Invoke-StatusRoute -Response $response -State $State -Location ([string]$request.QueryString["location"])) }
+    if ($method -eq "GET" -and $path -eq "/locations") { return (Invoke-LocationsRoute -Response $response -Locations $Locations) }
     if ($method -eq "GET" -and $path -eq "/logs") { return (Invoke-LogsRoute -Request $request -Response $response -LogPath $LogPath) }
     if ($method -eq "POST" -and $path -eq "/access") { return (Invoke-AccessRoute -Request $request -Response $response -State $State -LogPath $LogPath -AllowedIds $AllowedIds) }
 
@@ -625,11 +662,14 @@ function Invoke-Request {
         [string]$LogPath,
 
         [Parameter(Mandatory = $true)]
-        [hashtable]$AllowedIds
+        [hashtable]$AllowedIds,
+
+        [Parameter(Mandatory = $true)]
+        [object[]]$Locations
     )
 
     if (Invoke-StaticResourceRoute -Context $Context -AppRoot $AppRoot) { return }
-    if (Invoke-ApiRoute -Context $Context -State $State -LogPath $LogPath -AllowedIds $AllowedIds) { return }
+    if (Invoke-ApiRoute -Context $Context -State $State -LogPath $LogPath -AllowedIds $AllowedIds -Locations $Locations) { return }
     Send-TextResponse -Response $Context.Response -Text "Not Found" -StatusCode 404
 }
 
@@ -637,7 +677,9 @@ function Start-AcsServer {
     $appRoot = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { (Get-Location).Path } else { $PSScriptRoot }
     $logPath = Join-Path $appRoot "logs/access-log.csv"
     $listPath = Join-Path $appRoot "list.json"
+    $locationPath = Join-Path $appRoot "location.json"
     $allowedIds = Import-AllowedIds -ListPath $listPath
+    $locations = @(Import-Locations -LocationPath $locationPath)
 
     $state = @{
         Current = @{}
@@ -654,6 +696,7 @@ function Start-AcsServer {
     Write-Host ("App root: {0}" -f $appRoot)
     Write-Host ("Log path: {0}" -f $logPath)
     Write-Host ("List path: {0}" -f $listPath)
+    Write-Host ("Location path: {0}" -f $locationPath)
 
     try {
         $listener.Start()
@@ -662,7 +705,7 @@ function Start-AcsServer {
             $context = $listener.GetContext()
 
             try {
-                Invoke-Request -Context $context -AppRoot $appRoot -State $state -LogPath $logPath -AllowedIds $allowedIds
+                Invoke-Request -Context $context -AppRoot $appRoot -State $state -LogPath $logPath -AllowedIds $allowedIds -Locations $locations
             } catch {
                 Send-InternalServerError -Response $context.Response
             }

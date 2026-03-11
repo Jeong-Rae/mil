@@ -7,6 +7,9 @@ const $ = id => document.getElementById(id);
 let boardTimerId = null;
 let activeBoardView = "status";
 let boardLogs = [];
+let scannerLocation = "";
+let configuredLocations = [];
+let configuredLocationSet = new Set();
 const recentScans = {};
 
 const fetchJson = async (url, options) => {
@@ -41,12 +44,32 @@ const showMessage = (text, tone) => {
   if (tone) el.classList.add(`tone-${tone}`);
 };
 
+const normalizeLocations = items => {
+  if (!Array.isArray(items)) return [];
+
+  return items
+    .map(item => {
+      const location = String(item?.location || "").trim();
+      if (!location) return null;
+      return { location };
+    })
+    .filter(Boolean);
+};
+
+const setConfiguredLocations = items => {
+  configuredLocations = normalizeLocations(items);
+  configuredLocationSet = new Set(configuredLocations.map(item => item.location));
+};
+
+const isConfiguredLocation = value => configuredLocationSet.has(String(value || ""));
+
 const focusBarcodeInput = () => {
   window.setTimeout(() => {
-    const loc = $("location-input");
+    const panel = $("scanner-panel");
     const input = $("barcode-input");
 
-    if (!input || document.activeElement === loc) return;
+    if (!scannerLocation || !input || panel?.hidden) return;
+    if (document.activeElement === input) return;
 
     input.focus();
     input.select();
@@ -78,6 +101,7 @@ const markRecentScan = (location, rawBarcode) => {
   recentScans[getDuplicateKey(location, rawBarcode)] = Date.now();
 };
 
+const fetchLocations = () => fetchJson("/locations");
 const fetchAllStatus = () => fetchJson("/status");
 const fetchLogs = day => fetchJson(`/logs?day=${encodeURIComponent(day)}`);
 
@@ -154,29 +178,71 @@ const handleDuplicateSubmit = (parsed, location, input) => {
   return true;
 };
 
+const populateLocationSelect = items => {
+  const select = $("location-select");
+  if (!select) return;
+
+  const frag = document.createDocumentFragment();
+  frag.appendChild(createElement("option", "", "위치를 선택해 주세요."));
+  frag.firstChild.value = "";
+
+  for (const item of items) {
+    const option = createElement("option", "", item.location);
+    option.value = item.location;
+    frag.appendChild(option);
+  }
+
+  select.replaceChildren(frag);
+  select.value = "";
+};
+
+const activateScannerLocation = location => {
+  scannerLocation = String(location || "").trim();
+
+  const locationPanel = $("location-select-panel");
+  const scannerPanel = $("scanner-panel");
+  const selectedText = $("selected-location-text");
+
+  if (selectedText) selectedText.textContent = scannerLocation || "-";
+  if (locationPanel) locationPanel.hidden = !!scannerLocation;
+  if (scannerPanel) scannerPanel.hidden = !scannerLocation;
+
+  if (scannerLocation) {
+    showMessage("바코드를 스캔해 주세요.", null);
+    focusBarcodeInput();
+  }
+};
+
 const renderBoard = groups => {
   const root = $("board-groups");
   if (!root) return;
 
+  const statusByLocation = new Map();
   const items = Array.isArray(groups) ? groups : [];
+
+  for (const group of items) {
+    const location = String(group?.location || "");
+    if (!isConfiguredLocation(location)) continue;
+    statusByLocation.set(location, Array.isArray(group?.ids) ? group.ids : []);
+  }
+
   const frag = document.createDocumentFragment();
 
-  if (items.length === 0) {
+  if (configuredLocations.length === 0) {
     const card = createElement("article", "board-card empty-card");
     card.appendChild(createElement("h2", "", "현황 없음"));
-    card.appendChild(createElement("p", "", "아직 데이터가 없습니다."));
+    card.appendChild(createElement("p", "", "등록된 location이 없습니다."));
     frag.appendChild(card);
     root.replaceChildren(frag);
     return;
   }
 
-  for (const group of items) {
-    const location = group?.location ? String(group.location) : "unknown";
-    const ids = Array.isArray(group?.ids) ? group.ids : [];
+  for (const item of configuredLocations) {
+    const ids = statusByLocation.get(item.location) || [];
     const card = createElement("article", "board-card");
     const list = createElement("ul", "id-list");
 
-    card.appendChild(createElement("h2", "", location));
+    card.appendChild(createElement("h2", "", item.location));
     card.appendChild(createElement("div", "board-count", `인원 ${ids.length}명`));
 
     if (ids.length === 0) {
@@ -200,6 +266,7 @@ const renderLogs = () => {
   const order = $("log-sort-select")?.value || "desc";
   const items = boardLogs
     .filter(item => {
+      if (!isConfiguredLocation(item?.location)) return false;
       if (!query) return true;
 
       const id = String(item?.id || "").toLowerCase();
@@ -245,8 +312,9 @@ const refreshBoard = async () => {
   const updated = $("board-updated");
 
   try {
-    const data = await fetchAllStatus();
+    const [locations, data] = await Promise.all([fetchLocations(), fetchAllStatus()]);
 
+    setConfiguredLocations(locations);
     renderBoard(data);
     if (status) status.textContent = "정상";
     if (updated) updated.textContent = new Date().toLocaleString();
@@ -265,8 +333,9 @@ const refreshLogs = async () => {
   const day = dayInput?.value || getCurrentKstDay();
 
   try {
-    const data = await fetchLogs(day);
+    const [locations, data] = await Promise.all([fetchLocations(), fetchLogs(day)]);
 
+    setConfiguredLocations(locations);
     boardLogs = Array.isArray(data) ? data : [];
     renderLogs();
     if (status) status.textContent = "정상";
@@ -308,14 +377,12 @@ const startBoardPolling = () => {
 };
 
 const submitAccess = async () => {
-  const loc = $("location-input");
   const input = $("barcode-input");
-  const location = loc?.value.trim() || "";
+  const location = scannerLocation;
   const parsed = parseBarcode(input?.value);
 
   if (!location) {
-    showMessage("location을 입력해 주세요.", "error");
-    focusBarcodeInput();
+    showMessage("위치를 먼저 선택해 주세요.", "error");
     return;
   }
 
@@ -342,9 +409,12 @@ const submitAccess = async () => {
   }
 };
 
-const initScannerPage = () => {
+const initScannerPage = async () => {
   const input = $("barcode-input");
-  if (!input) return;
+  const select = $("location-select");
+  const button = $("select-location-button");
+
+  if (!input || !select || !button) return;
 
   input.addEventListener("keydown", event => {
     if (event.key !== "Enter") return;
@@ -364,14 +434,52 @@ const initScannerPage = () => {
     focusBarcodeInput();
   });
 
+  button.addEventListener("click", () => {
+    const location = select.value.trim();
+
+    if (!location) {
+      showMessage("위치를 선택해 주세요.", "error");
+      select.focus();
+      return;
+    }
+
+    activateScannerLocation(location);
+  });
+
+  select.addEventListener("keydown", event => {
+    if (event.key !== "Enter") return;
+
+    event.preventDefault();
+    button.click();
+  });
+
   document.addEventListener("click", event => {
-    const loc = $("location-input");
-    if (event.target === loc) return;
+    if (!scannerLocation) return;
+    if (event.target === button) return;
 
     focusBarcodeInput();
   });
 
-  focusBarcodeInput();
+  try {
+    const data = await fetchLocations();
+
+    setConfiguredLocations(data);
+    populateLocationSelect(configuredLocations);
+
+    if (configuredLocations.length === 0) {
+      showMessage("선택할 location이 없습니다.", "error");
+      button.disabled = true;
+      select.disabled = true;
+      return;
+    }
+
+    showMessage("위치를 선택해 주세요.", null);
+    select.focus();
+  } catch (err) {
+    showMessage(err.message || "location 목록을 불러오지 못했습니다.", "error");
+    button.disabled = true;
+    select.disabled = true;
+  }
 };
 
 const initBoardPage = () => {
@@ -405,5 +513,5 @@ const initBoardPage = () => {
   startBoardPolling();
 };
 
-initScannerPage();
+void initScannerPage();
 initBoardPage();

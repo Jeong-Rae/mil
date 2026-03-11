@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>7136부대 위치 정보 관리 시스템 현황판</title>
+  <title>7136부대 위치 정보 관리 시스템 조회</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body class="board-page">
@@ -23,61 +23,54 @@
       <div>마지막 갱신: <span id="bd-upd">-</span></div>
     </section>
 
-    <section class="view-sw" aria-label="현황판 보기 전환">
-      <button id="view-stat-btn" class="sw-btn" type="button">현황 보기</button>
-      <button id="view-log-btn" class="sw-btn is-active" type="button">로그 보기</button>
+    <section class="panel log-ctrl">
+      <label id="log-day-fld" class="field log-fld">
+        <span>날짜</span>
+        <input id="log-day" type="date">
+      </label>
+
+      <label class="field log-fld">
+        <span>현재 상태</span>
+        <select id="log-current">
+          <option value="all">전체</option>
+          <option value="current-entry">현재 입영자</option>
+          <option value="current-exit">현재 퇴영자</option>
+        </select>
+      </label>
+
+      <label class="field log-fld">
+        <span>검색</span>
+        <input id="log-q" type="text" autocomplete="off" placeholder="군번, 이름 또는 위치">
+      </label>
+
+      <label class="field log-fld">
+        <span>정렬</span>
+        <select id="log-sort">
+          <option value="desc">최신순</option>
+          <option value="asc">오래된순</option>
+        </select>
+      </label>
     </section>
 
-    <section id="stat-view" class="view-pane" aria-live="polite" hidden>
-      <section id="bd-grid" class="bd-grid">
-        <article class="bd-card empty-card">
-          <h2>현황 없음</h2>
-          <p>아직 데이터가 없습니다.</p>
-        </article>
-      </section>
-    </section>
-
-    <section id="log-view" class="view-pane">
-      <section class="panel log-ctrl">
-        <label class="field log-fld">
-          <span>날짜</span>
-          <input id="log-day" type="date">
-        </label>
-
-        <label class="field log-fld">
-          <span>검색</span>
-          <input id="log-q" type="text" autocomplete="off" placeholder="군번, 이름 또는 위치">
-        </label>
-
-        <label class="field log-fld">
-          <span>정렬</span>
-          <select id="log-sort">
-            <option value="desc">최신순</option>
-            <option value="asc">오래된순</option>
-          </select>
-        </label>
-      </section>
-
-      <section class="log-box" aria-live="polite">
-        <div class="tbl-wrap">
-          <table class="tbl-log">
-            <thead>
-              <tr>
-                <th scope="col">시간</th>
-                <th scope="col">구분</th>
-                <th scope="col">위치</th>
-                <th scope="col">군번</th>
-                <th scope="col">이름</th>
-              </tr>
-            </thead>
-            <tbody id="log-body">
-              <tr>
-                <td colspan="5" class="empty-cell">로그가 없습니다.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
+    <section class="log-box" aria-live="polite">
+      <div class="tbl-wrap">
+        <table class="tbl-log">
+          <thead>
+            <tr>
+              <th id="log-col-1" scope="col">시간</th>
+              <th id="log-col-2" scope="col">구분</th>
+              <th id="log-col-3" scope="col">위치</th>
+              <th id="log-col-4" scope="col">군번</th>
+              <th id="log-col-5" scope="col">이름</th>
+            </tr>
+          </thead>
+          <tbody id="log-body">
+            <tr>
+              <td colspan="5" class="empty-cell">로그가 없습니다.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
   </main>
   <script src="/script.js"></script>

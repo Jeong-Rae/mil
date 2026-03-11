@@ -5,8 +5,8 @@ const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const $ = id => document.getElementById(id);
 
 let boardTimerId = null;
-let activeBoardView = "logs";
 let boardLogs = [];
+let currentStatusById = new Map();
 let scannerLocation = "";
 let configuredLocations = [];
 let configuredLocationSet = new Set();
@@ -150,7 +150,6 @@ const markRecentScan = (location, rawBarcode) => {
 
 const fetchLocations = () => fetchJson("/location.json");
 const fetchMembers = () => fetchJson("/list.json");
-const fetchAllStatus = () => fetchJson("/status");
 const fetchLogsCsv = () => fetchText(`/logs/access-log.csv?ts=${Date.now()}`, { cache: "no-store" });
 
 const loadLocations = () => {
@@ -252,7 +251,7 @@ const parseAccessLogLine = line => {
   return { time, type, location, id };
 };
 
-const parseAccessLogsCsv = (text, day) => {
+const parseAccessLogsCsv = text => {
   const rows = String(text || "").replace(/\r/g, "").split("\n");
   const items = [];
 
@@ -261,12 +260,42 @@ const parseAccessLogsCsv = (text, day) => {
     if (!trimmed || trimmed === "time,type,location,id") continue;
 
     const item = parseAccessLogLine(trimmed);
-    if (!item || getKstDay(item.time) !== day) continue;
+    if (!item) continue;
 
     items.push(item);
   }
 
   return items;
+};
+
+const buildCurrentStatusById = items => {
+  const next = new Map();
+  const sorted = Array.isArray(items)
+    ? [...items].sort((left, right) => String(left?.time || "").localeCompare(String(right?.time || "")))
+    : [];
+
+  for (const item of sorted) {
+    const id = String(item?.id || "").trim();
+    const type = String(item?.type || "").trim();
+    if (!id || !type) continue;
+    next.set(id, {
+      id,
+      type,
+      location: String(item?.location || "").trim(),
+      time: String(item?.time || "").trim()
+    });
+  }
+
+  return next;
+};
+
+const getBoardMode = () => $("log-current")?.value || "all";
+const isCurrentListMode = () => getBoardMode() !== "all";
+const getCurrentTargetType = () => {
+  const mode = getBoardMode();
+  if (mode === "current-entry") return "entry";
+  if (mode === "current-exit") return "exit";
+  return "";
 };
 
 const clearInput = input => {
@@ -355,60 +384,50 @@ const activateScannerLocation = location => {
   }
 };
 
-const renderBoard = groups => {
-  const root = $("bd-grid");
-  if (!root) return;
+const setTableColumns = labels => {
+  const columns = [
+    $("log-col-1"),
+    $("log-col-2"),
+    $("log-col-3"),
+    $("log-col-4"),
+    $("log-col-5")
+  ];
 
-  const statusByLocation = new Map();
-  const items = Array.isArray(groups) ? groups : [];
-
-  for (const group of items) {
-    const location = String(group?.location || "");
-    if (!isConfiguredLocation(location)) continue;
-    statusByLocation.set(location, Array.isArray(group?.ids) ? group.ids : []);
+  for (let index = 0; index < columns.length; index += 1) {
+    const cell = columns[index];
+    const label = labels[index] || "";
+    if (!cell) continue;
+    cell.hidden = !label;
+    cell.textContent = label;
   }
-
-  const frag = document.createDocumentFragment();
-
-  if (configuredLocations.length === 0) {
-    const card = createElement("article", "bd-card empty-card");
-    card.appendChild(createElement("h2", "", "현황 없음"));
-    card.appendChild(createElement("p", "", "등록된 location이 없습니다."));
-    frag.appendChild(card);
-    root.replaceChildren(frag);
-    return;
-  }
-
-  for (const item of configuredLocations) {
-    const ids = statusByLocation.get(item.location) || [];
-    const card = createElement("article", "bd-card");
-    const list = createElement("ul", "id-list");
-
-    card.appendChild(createElement("h2", "", item.location));
-    card.appendChild(createElement("div", "bd-count", `인원 ${ids.length}명`));
-
-    if (ids.length === 0) {
-      list.appendChild(createElement("li", "empty-item", "현재 인원 없음"));
-    } else {
-      for (const id of ids) list.appendChild(createElement("li", "id-item", getMemberLabel(id)));
-    }
-
-    card.appendChild(list);
-    frag.appendChild(card);
-  }
-
-  root.replaceChildren(frag);
 };
 
-const renderLogs = () => {
+const getEmptyMessage = () => {
+  const mode = getBoardMode();
+  if (mode === "current-entry") return "현재 입영자가 없습니다.";
+  if (mode === "current-exit") return "현재 퇴영자가 없습니다.";
+  return "로그가 없습니다.";
+};
+
+const renderEmptyRow = colSpan => {
+  const row = createElement("tr");
+  const cell = createElement("td", "empty-cell", getEmptyMessage());
+
+  cell.colSpan = colSpan;
+  row.appendChild(cell);
+  return row;
+};
+
+const renderCurrentList = () => {
   const body = $("log-body");
   if (!body) return;
 
   const query = $("log-q")?.value.trim().toLowerCase() || "";
   const order = $("log-sort")?.value || "desc";
-  const items = boardLogs
+  const targetType = getCurrentTargetType();
+  const items = [...currentStatusById.values()]
     .filter(item => {
-      if (!isConfiguredLocation(item?.location)) return false;
+      if (!targetType || item?.type !== targetType) return false;
       if (!query) return true;
 
       const id = String(item?.id || "").toLowerCase();
@@ -421,15 +440,58 @@ const renderLogs = () => {
       return order === "asc" ? diff : diff * -1;
     });
 
+  setTableColumns(["군번", "이름", "최근 위치", "최근 시각", ""]);
+
   const frag = document.createDocumentFragment();
 
   if (items.length === 0) {
-    const row = createElement("tr");
-    const cell = createElement("td", "empty-cell", "로그가 없습니다.");
+    frag.appendChild(renderEmptyRow(4));
+    body.replaceChildren(frag);
+    return;
+  }
 
-    cell.colSpan = 5;
-    row.appendChild(cell);
+  for (const item of items) {
+    const row = createElement("tr");
+
+    row.appendChild(createElement("td", "", String(item?.id || "-")));
+    row.appendChild(createElement("td", "", getMemberName(item?.id) || "-"));
+    row.appendChild(createElement("td", "", String(item?.location || "-")));
+    row.appendChild(createElement("td", "", formatLogTime(item?.time)));
     frag.appendChild(row);
+  }
+
+  body.replaceChildren(frag);
+};
+
+const renderLogs = () => {
+  const body = $("log-body");
+  if (!body) return;
+
+  const day = $("log-day")?.value || getCurrentKstDay();
+  const query = $("log-q")?.value.trim().toLowerCase() || "";
+  const order = $("log-sort")?.value || "desc";
+  const items = boardLogs
+    .filter(item => {
+      if (!isConfiguredLocation(item?.location)) return false;
+      if (getKstDay(item?.time) !== day) return false;
+      if (!query) return true;
+
+      const id = String(item?.id || "").toLowerCase();
+      const name = getMemberName(item?.id).toLowerCase();
+      const location = String(item?.location || "").toLowerCase();
+      return id.includes(query) || name.includes(query) || location.includes(query);
+    })
+    .sort((left, right) => {
+      const diff = String(left?.time || "").localeCompare(String(right?.time || ""));
+      return order === "asc" ? diff : diff * -1;
+    });
+
+  setTableColumns(["시간", "구분", "위치", "군번", "이름"]);
+
+  const frag = document.createDocumentFragment();
+
+  if (items.length === 0) {
+    frag.appendChild(renderEmptyRow(5));
     body.replaceChildren(frag);
     return;
   }
@@ -448,25 +510,22 @@ const renderLogs = () => {
   body.replaceChildren(frag);
 };
 
-const refreshBoard = async () => {
-  const root = $("bd-grid");
-  if (!root) return;
-
-  const status = $("bd-stat");
-  const updated = $("bd-upd");
-
-  try {
-    const membersTask = loadMembers().catch(() => null);
-    const [locations, data] = await Promise.all([loadLocations(), fetchAllStatus()]);
-
-    setConfiguredLocations(locations);
-    await membersTask;
-    renderBoard(data);
-    if (status) status.textContent = "정상";
-    if (updated) updated.textContent = new Date().toLocaleString();
-  } catch {
-    if (status) status.textContent = "실패";
+const renderBoard = () => {
+  if (isCurrentListMode()) {
+    renderCurrentList();
+    return;
   }
+
+  renderLogs();
+};
+
+const syncBoardControls = () => {
+  const dayField = $("log-day-fld");
+  const dayInput = $("log-day");
+  const isCurrentMode = isCurrentListMode();
+
+  if (dayField) dayField.hidden = isCurrentMode;
+  if (dayInput) dayInput.disabled = isCurrentMode;
 };
 
 const refreshLogs = async () => {
@@ -475,17 +534,17 @@ const refreshLogs = async () => {
 
   const status = $("bd-stat");
   const updated = $("bd-upd");
-  const dayInput = $("log-day");
-  const day = dayInput?.value || getCurrentKstDay();
 
   try {
     const membersTask = loadMembers().catch(() => null);
     const [locations, csvText] = await Promise.all([loadLocations(), fetchLogsCsv()]);
 
     setConfiguredLocations(locations);
-    boardLogs = parseAccessLogsCsv(csvText, day);
+    boardLogs = parseAccessLogsCsv(csvText);
+    currentStatusById = buildCurrentStatusById(boardLogs);
     await membersTask;
-    renderLogs();
+    syncBoardControls();
+    renderBoard();
     if (status) status.textContent = "정상";
     if (updated) updated.textContent = new Date().toLocaleString();
   } catch {
@@ -493,34 +552,14 @@ const refreshLogs = async () => {
   }
 };
 
-const refreshActiveBoardView = () => {
-  if (activeBoardView === "logs") return refreshLogs();
-  return refreshBoard();
-};
-
-const setBoardView = view => {
-  activeBoardView = view === "logs" ? "logs" : "status";
-
-  const statusView = $("stat-view");
-  const logsView = $("log-view");
-  const statusButton = $("view-stat-btn");
-  const logsButton = $("view-log-btn");
-  const isLogsView = activeBoardView === "logs";
-
-  if (statusView) statusView.hidden = isLogsView;
-  if (logsView) logsView.hidden = !isLogsView;
-  if (statusButton) statusButton.classList.toggle("is-active", !isLogsView);
-  if (logsButton) logsButton.classList.toggle("is-active", isLogsView);
-};
-
 const startBoardPolling = () => {
-  const root = $("bd-grid");
+  const root = $("log-body");
   if (!root) return;
 
   if (boardTimerId !== null) clearInterval(boardTimerId);
 
   boardTimerId = window.setInterval(() => {
-    void refreshActiveBoardView();
+    void refreshLogs();
   }, BOARD_POLL_MS);
 };
 
@@ -643,11 +682,10 @@ const initScannerPage = async () => {
 };
 
 const initBoardPage = () => {
-  const root = $("bd-grid");
+  const root = $("log-body");
   const button = $("bd-refresh");
-  const statusButton = $("view-stat-btn");
-  const logsButton = $("view-log-btn");
   const dayInput = $("log-day");
+  const currentInput = $("log-current");
   const searchInput = $("log-q");
   const sortInput = $("log-sort");
 
@@ -655,22 +693,18 @@ const initBoardPage = () => {
 
   if (dayInput && !dayInput.value) dayInput.value = getCurrentKstDay();
 
-  if (button) button.addEventListener("click", () => void refreshActiveBoardView());
-  if (statusButton) statusButton.addEventListener("click", () => {
-    setBoardView("status");
-    void refreshActiveBoardView();
+  if (button) button.addEventListener("click", () => void refreshLogs());
+  if (dayInput) dayInput.addEventListener("change", () => renderBoard());
+  if (currentInput) currentInput.addEventListener("change", () => {
+    syncBoardControls();
+    renderBoard();
   });
-  if (logsButton) logsButton.addEventListener("click", () => {
-    setBoardView("logs");
-    void refreshActiveBoardView();
-  });
-  if (dayInput) dayInput.addEventListener("change", () => void refreshLogs());
-  if (searchInput) searchInput.addEventListener("input", () => renderLogs());
-  if (sortInput) sortInput.addEventListener("change", () => renderLogs());
+  if (searchInput) searchInput.addEventListener("input", () => renderBoard());
+  if (sortInput) sortInput.addEventListener("change", () => renderBoard());
 
   void loadMembers().catch(() => null);
-  setBoardView("logs");
-  void refreshActiveBoardView();
+  syncBoardControls();
+  void refreshLogs();
   startBoardPolling();
 };
 

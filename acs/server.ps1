@@ -33,7 +33,9 @@ function Send-BytesResponse {
 
     $Response.StatusCode = $StatusCode
     $Response.ContentType = $ContentType
-    $Response.ContentLength64 = $Bytes.Length
+    # PowerShell 5 / HttpListenerResponse 호환 이슈로 ContentLength64는 설정하지 않는다.
+    # OutputStream.Close()로 응답 종료는 정상 처리된다.
+    # $Response.ContentLength64 = $Bytes.Length
     $Response.OutputStream.Write($Bytes, 0, $Bytes.Length)
     $Response.OutputStream.Close()
 }
@@ -63,17 +65,10 @@ function Send-JsonResponse {
         [Parameter(Mandatory = $true)]
         [object]$Payload,
 
-        [switch]$AsArray,
-
         [int]$StatusCode = 200
     )
 
-    $json = if ($AsArray) {
-        $value = $Payload | ConvertTo-Json -Compress -Depth 8 -AsArray
-        if ($null -eq $value) { "[]" } else { $value }
-    } else {
-        $Payload | ConvertTo-Json -Compress -Depth 8
-    }
+    $json = $Payload | ConvertTo-Json -Compress -Depth 8
 
     Send-TextResponse -Response $Response -Text $json -ContentType "application/json; charset=utf-8" -StatusCode $StatusCode
 }
@@ -210,123 +205,6 @@ function Add-AccessRecord {
 }
 
 
-function Set-CurrentStatus {
-    param(
-        [Parameter(Mandatory = $true)]
-        [hashtable]$State,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Type,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Location,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Id
-    )
-
-    [System.Threading.Monitor]::Enter($State.Lock)
-    try {
-        foreach ($name in @($State.Current.Keys)) {
-            [void]$State.Current[$name].Remove($Id)
-        }
-
-        if ($Type -ne "entry") {
-            return
-        }
-
-        if (-not $State.Current.ContainsKey($Location)) {
-            $State.Current[$Location] = @{}
-        }
-
-        $bucket = $State.Current[$Location]
-        $bucket[$Id] = $true
-    } finally {
-        [System.Threading.Monitor]::Exit($State.Lock)
-    }
-}
-
-function Get-CurrentStatus {
-    param(
-        [Parameter(Mandatory = $true)]
-        [hashtable]$State,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Location
-    )
-
-    [System.Threading.Monitor]::Enter($State.Lock)
-    try {
-        $ids = @()
-        if ($State.Current.ContainsKey($Location)) {
-            $ids = @($State.Current[$Location].Keys | Sort-Object)
-        }
-
-        return [pscustomobject]@{
-            location = $Location
-            ids = $ids
-        }
-    } finally {
-        [System.Threading.Monitor]::Exit($State.Lock)
-    }
-}
-
-function Get-AllCurrentStatus {
-    param(
-        [Parameter(Mandatory = $true)]
-        [hashtable]$State
-    )
-
-    [System.Threading.Monitor]::Enter($State.Lock)
-    try {
-        $items = New-Object System.Collections.ArrayList
-        foreach ($location in @($State.Current.Keys | Sort-Object)) {
-            $ids = @($State.Current[$location].Keys | Sort-Object)
-            [void]$items.Add([pscustomobject]@{
-                location = $location
-                ids = $ids
-            })
-        }
-
-        return @($items)
-    } finally {
-        [System.Threading.Monitor]::Exit($State.Lock)
-    }
-}
-
-function Import-CurrentStatus {
-    param(
-        [Parameter(Mandatory = $true)]
-        [hashtable]$State,
-
-        [Parameter(Mandatory = $true)]
-        [string]$LogPath
-    )
-
-    if (-not (Test-Path -LiteralPath $LogPath)) {
-        return
-    }
-
-    $rows = Import-Csv -LiteralPath $LogPath
-    foreach ($row in $rows) {
-        if (-not (Test-AccessRecordRow -Row $row)) { continue }
-        Set-CurrentStatus -State $State -Type ([string]$row.type) -Location ([string]$row.location) -Id ([string]$row.id)
-    }
-}
-
-function Test-AccessRecordRow {
-    param(
-        [Parameter(Mandatory = $true)]
-        [object]$Row
-    )
-
-    return -not (
-        [string]::IsNullOrWhiteSpace([string]$Row.type) -or
-        [string]::IsNullOrWhiteSpace([string]$Row.location) -or
-        [string]::IsNullOrWhiteSpace([string]$Row.id)
-    )
-}
-
 function Invoke-StaticResourceRoute {
     param(
         [Parameter(Mandatory = $true)]
@@ -389,27 +267,6 @@ function Read-AccessPayload {
     }
 }
 
-function Invoke-StatusRoute {
-    param(
-        [Parameter(Mandatory = $true)]
-        [System.Net.HttpListenerResponse]$Response,
-
-        [Parameter(Mandatory = $true)]
-        [hashtable]$State,
-
-        [string]$Location
-    )
-
-    if ([string]::IsNullOrWhiteSpace($Location)) {
-        $items = @(Get-AllCurrentStatus -State $State)
-        Send-JsonResponse -Response $Response -Payload $items -AsArray
-        return $true
-    }
-
-    Send-JsonResponse -Response $Response -Payload (Get-CurrentStatus -State $State -Location $Location)
-    return $true
-}
-
 function Invoke-AccessRoute {
     param(
         [Parameter(Mandatory = $true)]
@@ -417,9 +274,6 @@ function Invoke-AccessRoute {
 
         [Parameter(Mandatory = $true)]
         [System.Net.HttpListenerResponse]$Response,
-
-        [Parameter(Mandatory = $true)]
-        [hashtable]$State,
 
         [Parameter(Mandatory = $true)]
         [string]$LogPath,
@@ -452,7 +306,6 @@ function Invoke-AccessRoute {
 
     try {
         Add-AccessRecord -LogPath $LogPath -Type $type -Location $location -Id $id
-        Set-CurrentStatus -State $State -Type $type -Location $location -Id $id
     } catch {
         Send-RejectedResponse -Response $Response -Message "failed to write access record" -StatusCode 500
         return $true
@@ -470,9 +323,6 @@ function Invoke-ApiRoute {
         [System.Net.HttpListenerContext]$Context,
 
         [Parameter(Mandatory = $true)]
-        [hashtable]$State,
-
-        [Parameter(Mandatory = $true)]
         [string]$LogPath,
 
         [Parameter(Mandatory = $true)]
@@ -484,8 +334,7 @@ function Invoke-ApiRoute {
     $path = $request.Url.AbsolutePath
     $method = $request.HttpMethod.ToUpperInvariant()
 
-    if ($method -eq "GET" -and $path -eq "/status") { return (Invoke-StatusRoute -Response $response -State $State -Location ([string]$request.QueryString["location"])) }
-    if ($method -eq "POST" -and $path -eq "/access") { return (Invoke-AccessRoute -Request $request -Response $response -State $State -LogPath $LogPath -AllowedIds $AllowedIds) }
+    if ($method -eq "POST" -and $path -eq "/access") { return (Invoke-AccessRoute -Request $request -Response $response -LogPath $LogPath -AllowedIds $AllowedIds) }
 
     return $false
 }
@@ -499,9 +348,6 @@ function Invoke-Request {
         [string]$AppRoot,
 
         [Parameter(Mandatory = $true)]
-        [hashtable]$State,
-
-        [Parameter(Mandatory = $true)]
         [string]$LogPath,
 
         [Parameter(Mandatory = $true)]
@@ -509,7 +355,7 @@ function Invoke-Request {
     )
 
     if (Invoke-StaticResourceRoute -Context $Context -AppRoot $AppRoot) { return }
-    if (Invoke-ApiRoute -Context $Context -State $State -LogPath $LogPath -AllowedIds $AllowedIds) { return }
+    if (Invoke-ApiRoute -Context $Context -LogPath $LogPath -AllowedIds $AllowedIds) { return }
     Send-TextResponse -Response $Context.Response -Text "Not Found" -StatusCode 404
 }
 
@@ -519,13 +365,6 @@ function Start-AcsServer {
     $listPath = Join-Path $appRoot "list.json"
     $membersData = Import-Members -ListPath $listPath
     $allowedIds = $membersData.AllowedIds
-
-    $state = @{
-        Current = @{}
-        Lock = [System.Object]::new()
-    }
-
-    Import-CurrentStatus -State $state -LogPath $logPath
 
     $listener = [System.Net.HttpListener]::new()
     $prefix = "http://+:8888/"
@@ -543,7 +382,7 @@ function Start-AcsServer {
             $context = $listener.GetContext()
 
             try {
-                Invoke-Request -Context $context -AppRoot $appRoot -State $state -LogPath $logPath -AllowedIds $allowedIds
+                Invoke-Request -Context $context -AppRoot $appRoot -LogPath $logPath -AllowedIds $allowedIds
             } catch {
                 Send-InternalServerError -Response $context.Response
             }

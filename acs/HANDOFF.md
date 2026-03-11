@@ -3,6 +3,66 @@
 ## 2026-03-11
 
 ### 작업 요약
+- `acs/board.html`, `acs/script.js`의 `현재 입영자`, `현재 퇴영자` 동작을 로그 필터에서 현재 인원 전체 목록 보기로 변경함.
+  - `전체` 선택 시에는 기존처럼 날짜 기반 로그 표를 유지함
+  - `현재 입영자` / `현재 퇴영자` 선택 시에는 사람 단위 목록 표로 전환함
+  - 현재 인원 목록 컬럼은 `군번`, `이름`, `최근 위치`, `최근 시각`으로 고정함
+- 현재 인원 목록 계산 기준을 명확히 함.
+  - `logs/access-log.csv` 전체 기준으로 군번별 마지막 로그 1건을 계산함
+  - 마지막 `type`이 `entry`면 현재 입영자, `exit`면 현재 퇴영자로 간주함
+  - 로그가 한 번도 없는 인원은 현재 목록에서 제외함
+- 현재 인원 목록 모드에서는 날짜 필터를 숨기고 사용하지 않도록 조정함.
+- `acs/SPEC.md`를 새 조회 계약에 맞게 갱신함.
+
+### 다음 세션 인계 포인트
+- `전체`는 로그 모드, `현재 입영자`와 `현재 퇴영자`는 현재 인원 목록 모드다.
+- 현재 인원 목록은 로그 행이 아니라 사람 명단 전체를 보여준다.
+- 현재 인원 목록은 `location.json` 표시 제한 없이 마지막 로그가 있는 전체 인원을 기준으로 계산한다.
+- 검색은 현재 인원 목록에서도 `군번`, `이름`, `최근 위치` 기준으로 동작한다.
+
+### 검증 내역
+- `node --check /workspaces/mil/acs/script.js`
+- `pwsh -NoLogo -NoProfile -Command "[void][scriptblock]::Create((Get-Content -LiteralPath '/workspaces/mil/acs/server.ps1' -Raw)); 'PARSE_OK'"`
+
+### 작업 요약
+- `acs/server.ps1`의 `Send-BytesResponse`에서 `ContentLength64` 설정을 주석 처리함.
+  - PowerShell 5 환경에서 해당 속성 설정 중 오류가 발생하는 문제를 우선 회피함
+  - 응답 종료는 기존처럼 `OutputStream.Close()`에 맡김
+
+### 다음 세션 인계 포인트
+- PowerShell 5 호환성 때문에 현재는 `Content-Length`를 명시하지 않는다.
+- 정적 파일/JSON 응답은 스트림 write 후 close로 마무리한다.
+
+### 검증 내역
+- `pwsh -NoLogo -NoProfile -Command "[void][scriptblock]::Create((Get-Content -LiteralPath '/workspaces/mil/acs/server.ps1' -Raw)); 'PARSE_OK'"`
+
+### 작업 요약
+- `acs/server.ps1`에서 `GET /status`와 location 기반 현재 상태 메모리 관리 로직을 제거함.
+  - `Set-CurrentStatus`, `Get-CurrentStatus`, `Get-AllCurrentStatus`, `Import-CurrentStatus`를 제거함
+  - 서버 책임은 `POST /access`와 정적 파일 서빙만 남김
+- `acs/board.html`, `acs/script.js`를 로그 전용 화면으로 단순화함.
+  - `현황 보기` 전환 버튼과 상태 카드 영역 제거
+  - 로그 필터에 `전체 / 현재 입영자 / 현재 퇴영자` 선택 추가
+- `acs/script.js`의 로그 처리 방식을 바꿈.
+  - `logs/access-log.csv` 전체를 먼저 읽고 파싱함
+  - CSV 전체 기준으로 군번별 마지막 `type` 맵을 계산함
+  - 선택 날짜의 로그에 대해 현재 상태 필터를 교집합으로 적용함
+- `acs/SPEC.md`를 현재 계약 기준으로 다시 정리함.
+  - 서버 API에서 `GET /status` 제거
+  - FE 로그 필터 규칙에 현재 입영자/퇴영자 계산 기준 추가
+
+### 다음 세션 인계 포인트
+- 현재 ACS 서버 API는 `POST /access`만 남는다.
+- `location`은 이제 기록용 필드와 로그 검색용 컬럼으로만 사용한다.
+- `현재 입영자/현재 퇴영자`는 선택 날짜 기준이 아니라 CSV 전체의 마지막 로그 타입 기준이다.
+- 로그 화면에는 선택 날짜의 행만 보이고, 현재 상태 필터는 그 행들에만 추가 적용된다.
+- 반영 확인 시에는 실행 중인 `acs/server.ps1`를 재시작해야 한다.
+
+### 검증 내역
+- `node --check /workspaces/mil/acs/script.js`
+- `pwsh -NoLogo -NoProfile -Command "[void][scriptblock]::Create((Get-Content -LiteralPath '/workspaces/mil/acs/server.ps1' -Raw)); 'PARSE_OK'"`
+
+### 작업 요약
 - `acs/server.ps1`에서 동적 조회 API를 줄이고, 서버 책임을 `POST /access`, `GET /status`, 정적 파일 서빙으로 축소함.
   - `GET /members`, `GET /locations`, `GET /logs`를 제거함
   - `list.json`, `location.json`, `logs/access-log.csv`를 정적 파일로 직접 서빙하도록 확장함
